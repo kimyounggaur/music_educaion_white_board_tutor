@@ -7,30 +7,12 @@
 <style>/*__STYLE__*/</style>
 </head>
 <body>
-<main>
-  <h1>음악 칠판 · 손 판서 시제품 (R1)</h1>
-  <p class="sub">손이 분필(또는 마커)로 판서하는 느낌만 따로 시험하는 화면이에요. 수업 화면과는 별개입니다.</p>
-
-  <div class="layout">
-    <div class="main">
-      <div class="pin">
-        <div id="frame" class="frame" data-theme="chalk">
-          <div id="stage" class="stage">
-            <canvas id="boardTex" aria-hidden="true"></canvas>
-            <div id="ink"></div>
-            <canvas id="dust" aria-hidden="true"></canvas>
-          </div>
-        </div>
-      </div>
-      <p id="status" class="status" role="status" aria-live="polite">준비 중…</p>
-      <div class="actions">
-        <button id="btnRestart" class="btn" type="button">처음부터 다시 쓰기</button>
-        <button id="btnFinish" class="btn ghost" type="button">바로 완성</button>
-      </div>
-    </div>
-
-    <div class="side">
-      <section class="panel" aria-label="보기 설정">
+<header class="app-header">
+  <div class="brand"><span aria-hidden="true" class="brand-icon">♪</span><h1>음악 칠판</h1></div>
+  <nav class="header-nav" aria-label="판서 도구">
+    <details class="menu" name="header-menu">
+      <summary>판서 설정 <span aria-hidden="true">▾</span></summary>
+      <section class="dropdown settings" aria-label="보기 설정">
         <div class="row"><span class="lab">장면</span>
           <div class="seg" data-opt="scene" role="group" aria-label="장면">
             <button type="button" data-v="chord" aria-pressed="true">① 화음 쌓기</button>
@@ -63,7 +45,13 @@
             <button type="button" data-v="canvas" aria-pressed="false">B 붓 도장</button>
           </div></div>
       </section>
-
+    </details>
+    <button id="btnRestart" class="btn" type="button">처음부터 다시 쓰기</button>
+    <button id="btnFinish" class="btn ghost" type="button">바로 완성</button>
+    <details class="menu menu-info" name="header-menu">
+      <summary>상태 · 도움말 <span aria-hidden="true">▾</span></summary>
+      <div class="dropdown info">
+        <p id="status" class="status" role="status" aria-live="polite">준비 중…</p>
       <section id="hud" class="hud" data-verdict="none" aria-label="측정 결과">
         <h2>프레임 측정 (이 기기)</h2>
         <dl>
@@ -75,8 +63,8 @@
         <p id="hudVerdict">판서가 끝나면 결과가 나옵니다.</p>
       </section>
 
-      <details>
-        <summary>영상과 비교할 때 볼 곳</summary>
+        <section aria-labelledby="compare-heading">
+          <h2 id="compare-heading">영상과 비교할 때 볼 곳</h2>
         <ol>
           <li>손의 크기와 모양, 펜을 쥔 느낌</li>
           <li>글씨가 써지는 속도와 리듬(글자 사이 쉬는 정도)</li>
@@ -84,10 +72,21 @@
           <li>선의 질감: 분필 같은지, 너무 거칠거나 매끈한지</li>
         </ol>
         <p class="note">'선 방식'은 A와 B를 번갈아 눌러 비교해 보세요. 어느 쪽이 더 분필 같은지가 결정할 내용입니다.</p>
-      </details>
+        </section>
+        <p class="note">손이 분필 또는 마커로 판서하는 느낌을 시험하는 화면입니다.</p>
+        <p class="note credit">글씨 모양: 개구체(Gaegu) 굵게의 글자 윤곽을 이용했어요. SIL Open Font License 1.1, Copyright 2018 The Gaegu Project Authors. 손 그림과 칠판·화이트보드 무늬는 직접 만든 것입니다.</p>
+      </div>
+    </details>
+  </nav>
+</header>
+<main class="board-area" aria-label="음악 판서 보드">
+  <div id="frame" class="frame" data-theme="chalk">
+    <div id="stage" class="stage">
+      <canvas id="boardTex" aria-hidden="true"></canvas>
+      <div id="ink"></div>
+      <canvas id="dust" aria-hidden="true"></canvas>
     </div>
   </div>
-  <p class="note credit">글씨 모양: 개구체(Gaegu) 굵게의 글자 윤곽을 이용했어요. SIL Open Font License 1.1, Copyright 2018 The Gaegu Project Authors. 손 그림과 칠판·화이트보드 무늬는 직접 만든 것입니다.</p>
 </main>
 <script>/*__SCRIPT__*/</script>
 </body>

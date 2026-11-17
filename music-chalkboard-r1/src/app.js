@@ -47,6 +47,7 @@ function start({ instant = false, sim = false } = {}) {
   stage.setAttribute("role", "img");
   stage.setAttribute("aria-label", `${theme.label}에 쓰는 내용: ${QUESTION} 오선과 음표 그림. ${SCENES[opts.scene].caption}`);
   stage.style.aspectRatio = `${scene.W} / ${scene.H}`;
+  frameEl.style.setProperty("--scene-aspect", String(scene.W / scene.H));
   const cssW = stage.clientWidth;
   const cssH = (cssW * scene.H) / scene.W;
 
@@ -308,6 +309,17 @@ function bind() {
   });
   $("#btnRestart").addEventListener("click", () => start());
   $("#btnFinish").addEventListener("click", () => finish());
+  // 메뉴 바깥을 누르거나 Escape를 누르면 열린 헤더 메뉴를 닫는다.
+  document.addEventListener("click", (event) => {
+    document.querySelectorAll(".menu[open]").forEach((menu) => {
+      if (!menu.contains(event.target)) menu.open = false;
+    });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const open = document.querySelector(".menu[open]");
+    if (open) { open.open = false; open.querySelector("summary").focus(); }
+  });
   if ("ResizeObserver" in window) {
     let first = true;
     new ResizeObserver(() => {

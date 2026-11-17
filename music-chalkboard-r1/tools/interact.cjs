@@ -1,7 +1,8 @@
 // 버튼 조작 시험: 쓰는 도중 바꾸기, 바로 완성, 화면 방향 바뀜, 동작 줄이기 설정.
 const path = require("path");
 const fs = require("fs");
-const { chromium } = require("/home/claude/music-chalkboard/node_modules/@playwright/test");
+// 브라우저 검증에는 프로젝트에서 접근 가능한 @playwright/test와 Chrome이 필요하다.
+const { chromium } = require("@playwright/test");
 const file = path.resolve(process.argv[2] || "dist/index.html");
 const outDir = path.resolve("out/interact");
 fs.mkdirSync(outDir, { recursive: true });
@@ -28,18 +29,31 @@ const seg = (opt, v) => `.seg[data-opt="${opt}"] button[data-v="${v}"]`;
     return buf;
   };
 
+  // 모든 보기 설정은 헤더 메뉴 안에 있다. 각 조작 후 메뉴를 닫아
+  // 판서 화면 비교 이미지에 드롭다운이 겹치지 않게 한다.
+  const settings = page.locator("header .menu:not(.menu-info)");
+  const choose = async (option, value) => {
+    if (!(await settings.evaluate((el) => el.open))) await settings.locator("summary").click();
+    await page.locator(seg(option, value)).click();
+    if (await settings.evaluate((el) => el.open)) await settings.locator("summary").click();
+  };
+  check("판서 보드에 버튼 없음", (await page.locator("main button, main summary").count()) === 0);
+  check("판서 설정과 재생 조작은 헤더에 있음", (await page.locator("header .seg[data-opt]").count()) === 6
+    && await page.locator("header #btnRestart").count() === 1
+    && await page.locator("header #btnFinish").count() === 1);
+
   // 1) 시작 버튼
   await page.tap("#btnRestart");
   await page.waitForTimeout(800);
   check("다시 쓰기 버튼으로 시작", (await state()) === "writing");
 
   // 2) 쓰는 도중 판 바꾸기 → 다시 시작
-  await page.tap(seg("theme", "white"));
+  await choose("theme", "white");
   await page.waitForTimeout(600);
   check("도중에 화이트보드로 바꾸면 새로 시작", (await state()) === "writing" && (await page.evaluate(() => window.__r1.opts.theme)) === "white");
   check("화이트보드면 가루 버튼이 잠김", await page.$eval(seg("dust", "on"), (b) => b.disabled));
   check("화이트보드면 '마커만' 표시", (await page.$eval(seg("hand", "pen"), (b) => b.textContent)) === "마커만");
-  await page.tap(seg("theme", "chalk"));
+  await choose("theme", "chalk");
   await page.waitForTimeout(400);
   check("칠판으로 돌아오면 가루 버튼이 풀림", !(await page.$eval(seg("dust", "on"), (b) => b.disabled)));
 
@@ -58,7 +72,7 @@ const seg = (opt, v) => `.seg[data-opt="${opt}"] button[data-v="${v}"]`;
   check("A: 바로 완성 = 끝까지 쓴 화면", Buffer.compare(shotFinish, shotNatural) === 0, `(${p(shotFinish)} / ${p(shotNatural)} bytes)`);
 
   // 같은 비교를 방식 B에서
-  await page.tap(seg("method", "canvas"));
+  await choose("method", "canvas");
   await page.waitForTimeout(400);
   await page.tap("#btnFinish");
   await page.waitForTimeout(300);
@@ -70,11 +84,11 @@ const seg = (opt, v) => `.seg[data-opt="${opt}"] button[data-v="${v}"]`;
   check("B: 바로 완성 = 끝까지 쓴 화면", Buffer.compare(finB, natB) === 0, `(${p(finB)} / ${p(natB)} bytes)`);
 
   // 5) 속도와 장면 바꾸기
-  await page.tap(seg("speed", "fast"));
+  await choose("speed", "fast");
   await page.waitForFunction(() => window.__r1.run.state === "done" && window.__r1.last, null, { timeout: 30000, polling: 250 });
   const fastTotal = await page.evaluate(() => window.__r1.last.seconds);
   check("빠르게는 보통보다 짧다", fastTotal < 6, `(${fastTotal.toFixed(1)}초)`);
-  await page.tap(seg("scene", "notes"));
+  await choose("scene", "notes");
   await page.waitForTimeout(500);
   check("장면 ②로 바꾸면 새로 시작", (await state()) === "writing" && (await page.evaluate(() => window.__r1.run.scene.key)) === "notes");
   await page.tap("#btnFinish");
