@@ -1,15 +1,17 @@
 {
   "name": "music-chalkboard-r1",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node tests/plan.test.mjs",
+    "test": "node tests/plan.test.mjs && node tests/scene-model.test.mjs && node tests/document-render.test.mjs && node tests/storage.test.mjs && node tests/storage-integration.test.mjs && node tests/player.test.mjs && node tests/app-integration.test.mjs",
     "glyphs": "node tools/build-glyphs.mjs <글꼴 woff 파일> tools/glyph-text.txt src/glyph-data.json"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
+    "fake-indexeddb": "^6.2.8",
+    "happy-dom": "^21.0.4",
     "opentype.js": "^2.0.0",
     "skeleton-tracing-js": "^1.0.4"
   }

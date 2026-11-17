@@ -1,396 +1,148 @@
-// 화면 연결: 설정, 판서 실행(화면 갱신 반복), 프레임 측정, 시험용 손잡이.
-import { buildScene, SCENES, QUESTION } from "./scene.js";
-import { buildPlan, segProgress, penAt } from "./plan.js";
-import { SvgRenderer } from "./render-svg.js";
-import { CanvasRenderer } from "./render-canvas.js";
-import { HandLayer } from "./hand.js";
-import { Dust } from "./dust.js";
-import { paintBoard } from "./texture.js";
-import { clamp } from "./util.js";
+import { createScene, defaultSteps, CHORD_PRESETS } from './scene-model.js';
+import { buildDocumentScene } from './scene.js';
+import { openSceneStorage, makeScenePackage, makeDraftPackage, recoverImportedDraft, validatePackage } from './scene-storage.js';
+import { openSceneEditor } from './scene-editor.js';
+import { openSceneList } from './ui/scene-list.js';
+import { ScenePlayer } from './player.js';
 
-const THEMES = {
-  chalk: { style: "chalk", label: "칠판", ink: { main: "#f3efe3", accent: "#ffd45e", dim: "#b9c7bc" } },
-  white: { style: "marker", label: "화이트보드", ink: { main: "#1d2a24", accent: "#e08a00", dim: "#56655d" } },
-};
+const $=s=>document.querySelector(s);
+const byId=id=>document.getElementById(id);
+const uuid=()=>crypto.randomUUID?.() || `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const clientId=uuid(); // 탭 복제 시에도 초안 식별자를 공유하지 않는다.
+const fields=['title','tags','question','caption','templateId','templateVersion','content','steps'];
+let storage=null, current=null, previewReturn=null, list=null, lastOrder=[], resizeTimer=0, composing=false;
+const status=message=>{byId('status').textContent=message;};
+const player=new ScenePlayer({stage:byId('stage'),frame:byId('frame'),board:byId('boardTex'),ink:byId('ink'),dust:byId('dust'),onChange:({state,completed,total,message})=>{
+  byId('playMode').value=player.mode;
+  byId('progress').textContent=`${completed} / ${total}단계${state==='paused'?' · 일시정지':''}`;
+  byId('previousStep').disabled=completed===0 && !(state==='playing'||state==='paused');
+  byId('nextStep').disabled=state==='completed'; byId('togglePlay').disabled=state==='completed';
+  if(message)status(message);
+}});
 
-const $ = (s) => document.querySelector(s);
-const stage = $("#stage");
-const inkHost = $("#ink");
-const boardTex = $("#boardTex");
-const frameEl = $("#frame");
-const dust = new Dust($("#dust"));
-const hand = new HandLayer(stage);
-
-const opts = { theme: "chalk", hand: "hand", dust: "on", speed: "normal", method: "svg", scene: "chord" };
-const query = new URLSearchParams(location.search);
-const forcedOrientation = query.get("o"); // 시험용: p | l
-const autoStart = query.get("auto") !== "0"; // 시험용: 자동 시작 끄기
-
-let run = null;
-let renderer = null;
-let rafId = 0;
-let last = null; // 마지막 판서의 측정 결과
-let resizeTimer = 0;
-
-const computePortrait = () => (forcedOrientation ? forcedOrientation === "p" : window.innerWidth < 760);
-const dustOn = () => opts.dust === "on" && THEMES[opts.theme].style === "chalk";
-
-// ───────── 판서 시작 ─────────
-function start({ instant = false, sim = false } = {}) {
-  cancelAnimationFrame(rafId);
-  const portrait = computePortrait();
-  const theme = THEMES[opts.theme];
-  document.documentElement.dataset.theme = opts.theme;
-  frameEl.dataset.theme = opts.theme;
-  const scene = buildScene(opts.scene, portrait);
-  const plan = buildPlan(scene, opts.speed);
-  stage.setAttribute("role", "img");
-  stage.setAttribute("aria-label", `${theme.label}에 쓰는 내용: ${QUESTION} 오선과 음표 그림. ${SCENES[opts.scene].caption}`);
-  stage.style.aspectRatio = `${scene.W} / ${scene.H}`;
-  frameEl.style.setProperty("--scene-aspect", String(scene.W / scene.H));
-  const cssW = stage.clientWidth;
-  const cssH = (cssW * scene.H) / scene.W;
-
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  boardTex.width = Math.max(1, Math.round(cssW * dpr));
-  boardTex.height = Math.max(1, Math.round(cssH * dpr));
-  paintBoard(boardTex, opts.theme);
-
-  if (renderer) renderer.destroy();
-  renderer = opts.method === "svg" ? new SvgRenderer(inkHost, scene, theme) : new CanvasRenderer(inkHost, scene, theme, cssW);
-
-  dust.resize(cssW, cssH);
-  dust.clear();
-  hand.configure({ penKind: theme.style === "chalk" ? "chalk" : "marker", mode: opts.hand });
-  hand.resize(cssW, cssH);
-  hand.show(false);
-
-  const itemLeft = new Map();
-  for (const it of scene.items) itemLeft.set(it.index, it.strokes.length);
-  run = {
-    scene,
-    plan,
-    portrait,
-    cursor: 0,
-    startTs: null,
-    lastTs: null,
-    state: instant ? "done" : sim ? "sim" : "writing",
-    gaps: [],
-    big: [], // 느렸던 프레임의 시각과 그때의 구간(원인 찾기용)
-    work: [],
-    itemLeft,
-    prevPen: null,
-    angle: -8,
-    hudAt: 0,
-  };
-  syncUI();
-  if (instant) {
-    renderer.completeAll();
-    setStatus("완성된 화면입니다. 총 " + plan.total.toFixed(1) + "초 걸리는 판서를 건너뛰었어요.");
-    return;
-  }
-  if (sim) return;
-  setStatus("준비 중…");
-  setHud("running");
-  const mine = run;
-  warmUp(mine).then(() => {
-    if (run !== mine || mine.state !== "writing") return; // 그 사이에 다시 시작했거나 건너뛰었으면 이 시작은 버린다
-    setStatus("쓰는 중…");
-    rafId = requestAnimationFrame(loop);
+function builtin(template,id,title,question,caption,adjust) {
+  const doc=createScene(template); doc.id=`builtin:${id}`; doc.origin='builtin'; doc.title=title; doc.question=question; doc.caption=caption;
+  doc.createdAt=doc.updatedAt='2026-11-18T00:00:00.000Z'; doc.renderSeed=123456;
+  adjust?.(doc); doc.steps=defaultSteps(doc); return doc;
+}
+const builtins=[
+  builtin('text-explanation','chord-intro','화음이란 무엇일까요?','화음은 무엇일까요?','여러 음이 어울려 하나의 화음을 만들어요.',d=>d.content.blocks[0].text='화음은 여러 음이 함께 울리는 소리예요.'),
+  builtin('note-selection','choose-notes','첫째·셋째·다섯째 음','다섯 음 중 어떤 음을 고를까요?','도·미·솔을 함께 연주해요.'),
+  ...[['I','으뜸화음 만들기'],['IV','버금딸림화음 만들기'],['V','딸림화음 만들기']].map(([degree,title])=>builtin('chord-stack',`chord-${degree}`,title,'주요 3화음은 어떻게 만들어요?','세 음을 쌓아 화음을 만들어요.',d=>{const p=CHORD_PRESETS[`C-major-${degree}`]; d.content={...d.content,preset:`C-major-${degree}`,notes:p.pitches.map((pitch,i)=>({id:`n${i+1}`,pitch})),chordName:p.chordName,roman:p.roman};})),
+  builtin('text-explanation','summary','주요 3화음 정리','세 화음을 다시 살펴볼까요?','이름과 구성음을 함께 읽어 보세요.',d=>{d.content.blocks=[{id:'b1',text:'으뜸화음 I: 도·미·솔',ink:'main'},{id:'b2',text:'버금딸림화음 IV: 파·라·도',ink:'main'},{id:'b3',text:'딸림화음 V: 솔·시·레',ink:'accent'}];}),
+];
+function closeMenus(){document.querySelectorAll('.menu[open]').forEach(m=>m.open=false);}
+async function openDoc(doc,{remember=true}={}) {
+  if(!doc || doc.deletedAt)return;
+  current=structuredClone(doc); byId('sceneTitle').textContent=doc.title; byId('sceneTitle').title=doc.title;
+  byId('editScene').textContent=doc.origin==='builtin'?'복제해서 편집':'내용 편집';
+  try {player.open(doc); if(remember&&storage) await storage.setSetting('lastSceneId',doc.id);}
+  catch(error){status(`장면을 열 수 없습니다: ${error.message}`);}
+}
+function download(value,name) {
+  const blob=new Blob([JSON.stringify(value,null,2)],{type:'application/json'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function filename(scene){return (scene.title || '장면').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').slice(0,40);}
+const exportScene=scene=>download(makeScenePackage([scene]),`${filename(scene)}.json`);
+async function exportAll(){if(!storage)throw Error('저장소를 사용할 수 없습니다.');const scenes=await storage.listScenes();if(!scenes.length)throw Error('백업할 내 장면이 없습니다.');download(makeScenePackage(scenes),'음악칠판_전체백업.json');}
+function layoutCheck(scene) {for(const portrait of [false,true]) {const problems=buildDocumentScene(scene,portrait).layoutErrors || [];if(problems.length)throw Error(`${portrait?'세로':'가로'} 화면: ${problems.map(p=>p.message||String(p)).join(' ')}`);}}
+function draftRecord(snapshot,baseRevision,isNew) {
+  const formData=Object.fromEntries(fields.map(k=>[k,structuredClone(snapshot[k])]));
+  return {draftId:`${clientId}:${snapshot.id}`,sceneId:isNew?null:snapshot.id,baseRevision:isNew?null:baseRevision,editorVersion:1,updatedAt:new Date().toISOString(),formData,clientId};
+}
+function cloneDoc(source) {const copy=structuredClone(source);copy.id=uuid();copy.origin='user';copy.revision=1;copy.deletedAt=null;copy.title=`${source.title}`.slice(0,34)+' 사본';copy.createdAt=copy.updatedAt=new Date().toISOString();delete copy.importInfo;return copy;}
+async function editDoc(original,isNew=false,allowTemplateChange=false,recoveredDraft=null) {
+  player.pause(); closeMenus(); const lessonSnapshot=player.snapshot(), lessonDoc=structuredClone(current); let doc=structuredClone(original), saved=false;
+  let draftId=recoveredDraft?.draftId || `${clientId}:${doc.id}`;
+  let baseRevision=isNew?null:original.revision;
+  if(recoveredDraft){baseRevision=recoveredDraft.baseRevision;Object.assign(doc,structuredClone(recoveredDraft.formData));}
+  else if(storage) {const draft=await storage.getDraft(draftId);if(draft && confirm('저장되지 않은 초안이 있습니다. 초안을 이어서 편집할까요?')) {Object.assign(doc,structuredClone(draft.formData));baseRevision=draft.baseRevision;}}
+  openSceneEditor({scene:doc,isNew,allowTemplateChange,
+    onSave:async snapshot=>{layoutCheck(snapshot);if(!storage)throw Error('저장소를 사용할 수 없습니다. 브라우저 저장 설정을 확인해 주세요.');
+      try {const result=await storage.saveScene(snapshot,{expectedRevision:baseRevision,draftId});saved=true;await openDoc(result);status('장면을 저장했습니다.');}
+      catch(error){if(error.code==='conflict'){if(confirm('다른 탭에서 원본이 변경되었습니다. 현재 내용을 새 장면 사본으로 저장할까요?')){const copy=cloneDoc(snapshot);const result=await storage.saveScene(copy,{expectedRevision:null,draftId});saved=true;await openDoc(result);status('변경 내용을 새 장면 사본으로 저장했습니다.');return;} throw Error('저장 충돌이 발생했습니다. 초안을 유지하거나 파일로 내보낼 수 있습니다.');}throw error;}
+    },
+    onDraft:async snapshot=>{if(!storage)throw Error('저장소를 사용할 수 없습니다.'); await storage.saveDraft(draftRecord(snapshot,baseRevision,isNew));},
+    onDiscard:async()=>{if(storage)await storage.deleteDraft(draftId);},
+    onExportDraft:snapshot=>download(makeDraftPackage(draftRecord(snapshot,baseRevision,isNew)),`${filename(snapshot)}_초안.json`),
+    onPreview:async(snapshot,{startStep,returnToEditor})=>{layoutCheck(snapshot);byId('sceneMenu').inert=true;byId('sceneSearchForm').inert=true;previewReturn=()=>{byId('sceneMenu').inert=false;byId('sceneSearchForm').inert=false;current=lessonDoc;byId('sceneTitle').textContent=lessonDoc.title;byId('sceneTitle').title=lessonDoc.title;player.restore(lessonSnapshot);returnToEditor();};byId('returnPreview').hidden=false;byId('returnPreview').focus();await openDoc(snapshot,{remember:false});player.previewFrom(startStep);byId('sceneTitle').textContent=`미리보기 · 저장 전 · ${snapshot.title}`;},
+    onClose:async()=>{if(previewReturn){previewReturn=null;byId('sceneMenu').inert=false;byId('sceneSearchForm').inert=false;byId('returnPreview').hidden=true;} if(!saved && current?.id!==lessonDoc?.id){current=lessonDoc;byId('sceneTitle').textContent=lessonDoc.title;player.restore(lessonSnapshot);}}
+  });
+}
+async function openList(query='') {
+  player.pause();closeMenus();
+  list=openSceneList({query,data:async()=>{const scenes=storage?await storage.listScenes({includeDeleted:true}):[];return {builtins,scenes,order:scenes.filter(s=>!s.deletedAt).map(s=>s.id)};},
+    onOpen:async(scene,ids)=>{lastOrder=ids;await openDoc(scene);},
+    onEdit:scene=>{setTimeout(()=>editDoc(scene),0);},onClone:scene=>{setTimeout(()=>editDoc(cloneDoc(scene),true),0);},onNew:()=>{setTimeout(()=>editDoc(createScene(),true,true),0);},
+    onDelete:async scene=>{if(!storage)throw Error('저장소를 사용할 수 없습니다.');await storage.setDeleted(scene.id,scene.revision,true);if(current?.id===scene.id)await openDoc(builtins[0]);},
+    onRestore:scene=>storage.setDeleted(scene.id,scene.revision,false),onPurge:scene=>storage.permanentlyDelete(scene.id,scene.revision),onReorder:ids=>storage.reorderScenes(ids),
+    onImport:()=>{byId('fileImport').click();},onExport:exportScene,onBackup:exportAll,onClose:()=>{list=null;}
   });
 }
 
-/** 손 그림을 한 번 미리 그려 두어, 판서 첫머리에서 화면이 끊기지 않게 한다(눈에는 거의 보이지 않음) */
-function warmUp(r) {
-  return new Promise((resolve) => {
-    const w = stage.clientWidth;
-    const h = (w * r.scene.H) / r.scene.W;
-    hand.root.style.opacity = "0.02";
-    hand.update(w * 0.5, h * 0.45, 0, -8);
-    hand.show(true);
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        hand.root.style.opacity = "";
-        hand.show(false);
-        resolve();
-      }),
-    );
-  });
-}
-
-// ───────── 한 프레임 ─────────
-function finalizeSeg(seg) {
-  if (seg.type !== "draw") return;
-  for (const part of seg.parts) {
-    renderer.setPart(part, 1);
-    const left = run.itemLeft.get(part.item.index) - 1;
-    run.itemLeft.set(part.item.index, left);
-    if (left === 0) renderer.completeItem(part.item);
+async function recoverDraft() {
+  player.pause(); closeMenus();
+  if(!storage){status('저장소를 사용할 수 없습니다.');return;}
+  const drafts=await storage.listDrafts();
+  if(!drafts.length){status('복구할 초안이 없습니다.');alert('복구할 초안이 없습니다.');return;}
+  const dialog=document.createElement('dialog'); dialog.className='draft-dialog';
+  const h=document.createElement('h2');h.textContent='저장되지 않은 초안';dialog.append(h);
+  const intro=document.createElement('p');intro.textContent='복구할 초안을 선택하세요. 원본 장면과 초안은 별도로 보관됩니다.';dialog.append(intro);
+  for(const draft of drafts.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))) {
+    const row=document.createElement('div');row.className='draft-row';
+    const label=document.createElement('span');label.textContent=`${draft.formData.title||'제목 없는 초안'} · ${new Date(draft.updatedAt).toLocaleString('ko-KR')}`;
+    const recover=document.createElement('button');recover.textContent='이어서 편집';recover.onclick=async()=>{
+      const source=draft.sceneId && await storage.getScene(draft.sceneId);
+      let doc, isNew;
+      if(source && !source.deletedAt && source.revision===draft.baseRevision){doc=structuredClone(source);isNew=false;}
+      else {doc=createScene(draft.formData.templateId);isNew=true;}
+      Object.assign(doc,structuredClone(draft.formData));dialog.close();dialog.remove();await editDoc(doc,isNew,false,isNew?{...draft,baseRevision:null}:draft);
+      if(isNew && draft.sceneId) status('원본이 변경되어 초안을 새 장면으로 복구했습니다.');
+    };
+    const backup=document.createElement('button');backup.textContent='파일로 저장';backup.onclick=()=>download(makeDraftPackage(draft),'음악칠판_초안.json');
+    row.append(label,recover,backup);dialog.append(row);
   }
-  // 선 하나가 끝날 때 작은 가루 뭉치(설계서 6.6)
-  if (dustOn() && seg.item.type === "line") {
-    const e = seg.penStroke.pts[seg.penStroke.pts.length - 1];
-    const k = stage.clientWidth / run.scene.W;
-    dust.burst(e[0] * k, e[1] * k, THEMES[opts.theme].ink[seg.ink]);
-  }
+  const close=document.createElement('button');close.textContent='닫기';close.onclick=()=>{dialog.close();dialog.remove();};dialog.append(close);document.body.append(dialog);dialog.showModal();close.focus();
+  dialog.addEventListener('close',()=>dialog.remove(),{once:true});
 }
 
-function frame(t, dt) {
-  const { plan, scene } = run;
-  const segs = plan.segs;
-  while (run.cursor < segs.length && segs[run.cursor].t1 <= t) {
-    finalizeSeg(segs[run.cursor]);
-    run.cursor++;
-  }
-  const seg = segs[run.cursor];
-  const k = stage.clientWidth / scene.W; // 논리 좌표 → 화면 px
-  if (!seg) {
-    hand.show(false);
-  } else {
-    if (seg.type === "draw") {
-      const p = segProgress(seg, t);
-      for (const part of seg.parts) renderer.setPart(part, p);
-    }
-    const pen = penAt(plan, seg, t);
-    const cx = pen.x * k;
-    const cy = pen.y * k;
-    // 기울기: 기본 −8도, 쓰는 방향에 따라 ±6도, 0.08초에 걸쳐 따라간다
-    const target = -8 + 6 * clamp(pen.dx, -1, 1);
-    run.angle += (target - run.angle) * (1 - Math.exp(-dt / 0.08));
-    hand.setInk(THEMES[opts.theme].ink[seg.ink]);
-    hand.show(true);
-    hand.update(cx, cy, pen.lift, run.angle);
-    if (dustOn() && pen.down && run.prevPen && run.prevPen.down) {
-      const d = Math.hypot(cx - run.prevPen.x, cy - run.prevPen.y);
-      dust.trail(cx, cy, d, THEMES[opts.theme].ink[seg.ink]);
-    }
-    run.prevPen = { x: cx, y: cy, down: pen.down };
-  }
-  if (dustOn() || dust.active) dust.step(dt);
+async function changeScene(delta) {
+  const all=[...builtins,...(storage?await storage.listScenes():[])], order=lastOrder.length?lastOrder:all.map(s=>s.id), index=order.indexOf(current?.id), id=order[index+delta], target=all.find(s=>s.id===id);if(target)await openDoc(target);
+}
+async function importFile(file) {
+  if(!file)return;if(!storage)throw Error('저장소를 사용할 수 없습니다.');if(file.size>5*1024*1024)throw Error('파일은 5 MiB 이하여야 합니다.');
+  const text=await file.text(), pkg=validatePackage(text);
+  if(pkg.kind==='draft') {const draft=recoverImportedDraft(pkg,clientId);await storage.saveDraft(draft);const doc=createScene(draft.formData.templateId);Object.assign(doc,draft.formData);await editDoc(doc,true,false,draft);status('파일의 초안을 편집기로 열었습니다.');}
+  else {if(!confirm(`${pkg.scenes.length}개 장면을 새 사본으로 가져올까요?`))return;const imported=await storage.importBundle(pkg);status(`${imported.length}개 장면을 사본으로 가져왔습니다.`);list?.refresh();}
 }
 
-function loop(ts) {
-  if (!run || run.state !== "writing") return;
-  if (run.startTs === null) run.startTs = ts;
-  const t = (ts - run.startTs) / 1000;
-  const dt = run.lastTs === null ? 1 / 60 : Math.min(0.1, (ts - run.lastTs) / 1000);
-  const writing = t <= run.plan.total + 1e-6;
-  if (run.lastTs !== null && writing) {
-    const gap = ts - run.lastTs;
-    run.gaps.push(gap);
-    if (gap > 30 && run.big.length < 20) {
-      const sg = run.plan.segs[run.cursor];
-      run.big.push({ t: Math.round(t * 100) / 100, gap: Math.round(gap), seg: sg ? sg.type + ":" + (sg.item ? sg.item.id : "") : "-" });
-    }
-  }
-  const w0 = performance.now();
-  frame(t, dt);
-  if (writing) run.work.push(performance.now() - w0);
-  run.lastTs = ts;
-  if (ts - run.hudAt > 300) {
-    run.hudAt = ts;
-    setHud("running");
-  }
-  if (t >= run.plan.total && !dust.active) {
-    finishRun();
-    return;
-  }
-  rafId = requestAnimationFrame(loop);
-}
-
-function finishRun() {
-  run.state = "done";
-  hand.show(false);
-  dust.clear();
-  last = summarize(run);
-  setStatus(`다 썼어요. 쓰는 데 ${run.plan.total.toFixed(1)}초 걸렸어요.`);
-  setHud("done");
-  syncUI();
-}
-
-/** 프레임 간격 통계 */
-function summarize(r) {
-  const g = r.gaps.slice().sort((a, b) => a - b);
-  const n = g.length;
-  const pct = (q) => (n ? g[Math.min(n - 1, Math.floor(q * (n - 1)))] : 0);
-  const sum = g.reduce((a, b) => a + b, 0);
-  const w = r.work;
-  return {
-    frames: n,
-    avgFps: n ? 1000 / (sum / n) : 0,
-    p50: pct(0.5),
-    p95: pct(0.95),
-    p99: pct(0.99),
-    max: n ? g[n - 1] : 0,
-    over20: g.filter((x) => x > 20).length,
-    over34: g.filter((x) => x > 34).length,
-    workAvg: w.length ? w.reduce((a, b) => a + b, 0) / w.length : 0,
-    workMax: w.length ? Math.max(...w) : 0,
-    seconds: r.plan.total,
-    big: r.big,
-    opts: { ...opts },
-    portrait: r.portrait,
-  };
-}
-
-// ───────── 바로 완성 ─────────
-function finish() {
-  if (!run) return;
-  cancelAnimationFrame(rafId);
-  const wasWriting = run.state === "writing";
-  renderer.completeAll();
-  hand.show(false);
-  dust.clear();
-  run.state = "done";
-  setStatus("바로 완성했어요.");
-  if (wasWriting) setHud("skipped");
-  syncUI();
-}
-
-// ───────── 화면 표시 ─────────
-function setStatus(text) {
-  $("#status").textContent = text;
-}
-
-const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : "–");
-
-function setHud(mode) {
-  const q = (id, v) => ($(id).textContent = v);
-  if (mode === "running") {
-    const g = run.gaps.slice(-30);
-    const avg = g.length ? g.reduce((a, b) => a + b, 0) / g.length : 0;
-    q("#hudFps", avg ? fmt(1000 / avg, 0) : "–");
-    q("#hudP95", "측정 중");
-    q("#hudMax", "–");
-    q("#hudWork", "–");
-    $("#hudVerdict").textContent = "판서가 끝나면 결과가 나옵니다.";
-    $("#hud").dataset.verdict = "running";
-    return;
-  }
-  if (mode === "skipped") {
-    $("#hudVerdict").textContent = "중간에 건너뛰어 이번 측정은 쓰지 않아요.";
-    $("#hud").dataset.verdict = "none";
-    return;
-  }
-  if (!last) return;
-  q("#hudFps", fmt(last.avgFps, 0));
-  q("#hudP95", fmt(last.p95));
-  q("#hudMax", fmt(last.max, 0));
-  q("#hudWork", fmt(last.workAvg, 2));
-  const level = last.p95 <= 20 ? "pass" : last.p95 <= 34 ? "ok" : "fail";
-  $("#hud").dataset.verdict = level;
-  const detail = `프레임의 95%가 ${fmt(last.p95)}ms 이하예요. 20ms를 넘은 프레임 ${last.over20}개, 34ms를 넘은 프레임 ${last.over34}개(전체 ${last.frames}개).`;
-  $("#hudVerdict").textContent =
-    (level === "pass" ? "부드러워요(PC 기준 20ms 통과). " : level === "ok" ? "폰 기준(34ms)은 통과, PC 기준(20ms)은 미달. " : "끊겨 보일 수 있어요(34ms 초과). ") + detail;
-}
-
-function syncUI() {
-  document.querySelectorAll(".seg").forEach((seg) => {
-    const key = seg.dataset.opt;
-    seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(opts[key] === b.dataset.v)));
-  });
-  // 가루는 칠판(분필)에서만
-  const dustSeg = $('.seg[data-opt="dust"]');
-  const chalk = THEMES[opts.theme].style === "chalk";
-  dustSeg.querySelectorAll("button").forEach((b) => (b.disabled = !chalk));
-  dustSeg.closest(".row").dataset.disabled = String(!chalk);
-  $('.seg[data-opt="hand"] button[data-v="pen"]').textContent = chalk ? "분필만" : "마커만";
-  document.documentElement.dataset.state = run ? run.state : "idle";
-}
-
-function bind() {
-  document.querySelectorAll(".seg button").forEach((b) => {
-    b.addEventListener("click", () => {
-      const key = b.closest(".seg").dataset.opt;
-      if (opts[key] === b.dataset.v) return;
-      opts[key] = b.dataset.v;
-      start();
-    });
-  });
-  $("#btnRestart").addEventListener("click", () => start());
-  $("#btnFinish").addEventListener("click", () => finish());
-  // 메뉴 바깥을 누르거나 Escape를 누르면 열린 헤더 메뉴를 닫는다.
-  document.addEventListener("click", (event) => {
-    document.querySelectorAll(".menu[open]").forEach((menu) => {
-      if (!menu.contains(event.target)) menu.open = false;
-    });
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape") return;
-    const open = document.querySelector(".menu[open]");
-    if (open) { open.open = false; open.querySelector("summary").focus(); }
-  });
-  if ("ResizeObserver" in window) {
-    let first = true;
-    new ResizeObserver(() => {
-      if (first) {
-        first = false;
-        return;
-      }
-      clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(onResize, 150);
-    }).observe(stage);
-  }
-  window.addEventListener("resize", () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(onResize, 150);
-  });
-  // 화면이 가려지면 끝낸다(설계서 7.5)
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden && run && run.state === "writing") finish();
-  });
-}
-
-function onResize() {
-  if (!run) return;
-  if (computePortrait() !== run.portrait) {
-    start();
-    return;
-  }
-  const cssW = stage.clientWidth;
-  const cssH = (cssW * run.scene.H) / run.scene.W;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  boardTex.width = Math.max(1, Math.round(cssW * dpr));
-  boardTex.height = Math.max(1, Math.round(cssH * dpr));
-  paintBoard(boardTex, opts.theme);
-  dust.resize(cssW, cssH);
-  hand.resize(cssW, cssH);
-  if (renderer instanceof CanvasRenderer) renderer.resize(cssW);
-}
-
-// ───────── 시험용 손잡이 ─────────
-/** 시간 t(초)까지를 실제 시계 없이 60분의 1초씩 흘려 보낸 모습으로 만든다(화면 캡처와 시험용) */
-function seek(t, fps = 60) {
-  start({ sim: true });
-  const dt = 1 / fps;
-  for (let k = 0; k * dt <= t + 1e-9; k++) frame(k * dt, dt);
-  run.state = "paused";
-  syncUI();
-}
-
-window.__r1 = {
-  opts,
-  start,
-  finish,
-  seek,
-  get run() {
-    return run;
-  },
-  get last() {
-    return last;
-  },
-  setOptions(o) {
-    Object.assign(opts, o);
-    start();
-  },
-};
-
-bind();
-syncUI();
-const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-if (reduce) {
-  start({ instant: true });
-  setStatus("기기의 '동작 줄이기'가 켜져 있어 완성된 화면을 바로 보여 드려요. '처음부터 다시 쓰기'를 누르면 판서합니다.");
-} else if (autoStart) {
-  setTimeout(() => start(), 500);
-}
+byId('sceneSearchForm').onsubmit=e=>{e.preventDefault();if(!previewReturn)openList(byId('sceneSearch').value);};
+byId('openScenes').onclick=()=>openList();
+byId('recoverDraft').onclick=()=>recoverDraft().catch(e=>status(e.message));
+byId('newScene').onclick=()=>editDoc(createScene(),true,true);
+byId('duplicateScene').onclick=()=>editDoc(cloneDoc(current),true);
+byId('editScene').onclick=()=>current.origin==='builtin'?editDoc(cloneDoc(current),true):editDoc(current);
+byId('importScenes').onclick=()=>{closeMenus();player.pause();byId('fileImport').click();};
+byId('exportScene').onclick=()=>{try{exportScene(current);status('현재 장면을 내보냈습니다.');}catch(e){status(e.message);}};
+byId('exportAll').onclick=()=>exportAll().catch(e=>status(e.message));
+byId('fileImport').onchange=async e=>{try{await importFile(e.target.files[0]);}catch(err){status(`가져오기 실패: ${err.message}`);alert(`가져오기 실패: ${err.message}`);}finally{e.target.value='';}};
+byId('nextStep').onclick=()=>player.next();byId('previousStep').onclick=()=>player.previous();byId('togglePlay').onclick=()=>player.toggle();byId('restart').onclick=()=>player.restart();byId('finish').onclick=()=>player.finish();
+byId('playMode').onchange=e=>{player.mode=e.target.value;storage?.setSetting('playMode',player.mode).catch(()=>{});};
+byId('method').onchange=e=>{player.setOption('method',e.target.value);storage?.setSetting('viewOptions',player.opts).catch(()=>{});};
+document.querySelectorAll('.seg button').forEach(b=>{b.onclick=()=>{const key=b.closest('.seg').dataset.opt;player.setOption(key,b.dataset.v);syncOptions();storage?.setSetting('viewOptions',player.opts).catch(()=>{});};});
+function syncOptions(){document.querySelectorAll('.seg').forEach(seg=>seg.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(player.opts[seg.dataset.opt]===b.dataset.v))));}
+byId('returnPreview').onclick=()=>{const go=previewReturn;previewReturn=null;byId('returnPreview').hidden=true;player.pause();go?.();};
+document.addEventListener('click',e=>document.querySelectorAll('.menu[open]').forEach(m=>{if(!m.contains(e.target))m.open=false;}));
+document.addEventListener('compositionstart',()=>composing=true);document.addEventListener('compositionend',()=>composing=false);
+document.addEventListener('keydown',e=>{
+ if(e.isComposing||composing||e.repeat||e.ctrlKey||e.metaKey||e.altKey)return;
+ if(e.key==='Escape'){const menu=$('.menu[open]');if(menu){menu.open=false;menu.querySelector('summary').focus();}return;}
+ if(document.querySelector('dialog[open], .menu[open]') || e.target.closest('input,textarea,select,button,summary,a,[contenteditable="true"]'))return;
+ if(e.shiftKey&&e.key==='PageDown'){e.preventDefault();changeScene(1);return;}if(e.shiftKey&&e.key==='PageUp'){e.preventDefault();changeScene(-1);return;}
+ if(e.key==='ArrowRight'||e.key==='PageDown'){e.preventDefault();player.next();}else if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();player.previous();}else if(e.key===' '){e.preventDefault();player.toggle();}
+});
+document.addEventListener('visibilitychange',()=>{if(document.hidden)player.pause();});
+window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>player.resize(),180);});
+(async()=>{syncOptions();try{storage=await openSceneStorage();const savedOpts=await storage.getSetting('viewOptions');if(savedOpts && typeof savedOpts==='object') for(const [key,allowed] of Object.entries({theme:['chalk','white'],hand:['hand','pen'],dust:['on','off'],speed:['slow','normal','fast'],method:['svg','canvas']})) if(allowed.includes(savedOpts[key]))player.opts[key]=savedOpts[key];const mode=await storage.getSetting('playMode');if(['step','auto','continuous'].includes(mode))player.mode=byId('playMode').value=mode;byId('method').value=player.opts.method;syncOptions();const last=await storage.getSetting('lastSceneId');const doc=builtins.find(s=>s.id===last)||(typeof last==='string'?await storage.getScene(last):null)||builtins[0];await openDoc(doc.deletedAt?builtins[0]:doc);}
+catch(e){await openDoc(builtins[0],{remember:false});status(`기본 장면을 열었습니다. 저장소를 사용할 수 없습니다: ${e.message}`);}})();

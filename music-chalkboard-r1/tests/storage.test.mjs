@@ -1,0 +1,23 @@
+import assert from 'node:assert/strict';
+import { createScene } from '../src/scene-model.js';
+import { makeScenePackage, validatePackage, makeDraftPackage, recoverImportedDraft, reconcileSceneOrder } from '../src/scene-storage.js';
+
+const scene = createScene('chord-stack');
+const backup = makeScenePackage([scene]);
+assert.equal(validatePackage(JSON.stringify(backup)).scenes[0].id, scene.id);
+assert.deepEqual(reconcileSceneOrder(['b', 'b', 'missing'], [{id:'a'}, {id:'b'}]), ['b', 'a']);
+assert.throws(() => validatePackage({...backup, scenes:[scene, scene]}), /중복/);
+assert.throws(() => validatePackage({...backup, version:2}), /지원하지/);
+assert.throws(() => validatePackage({...backup, lessons:[{}]}), /지원하지/);
+assert.throws(() => validatePackage({...backup, sceneOrder:['missing']}), /순서/);
+assert.throws(() => validatePackage(JSON.stringify({...backup, unknown:{constructor:'bad'}})), /허용되지/);
+const draft = {draftId:'draft', sceneId:scene.id, baseRevision:1, editorVersion:1, updatedAt:new Date().toISOString(), clientId:'tab', formData:{title:''}};
+const draftBackup = makeDraftPackage(draft);
+assert.equal(draftBackup.draft.clientId, undefined);
+const recovered = recoverImportedDraft(draftBackup, 'new-tab');
+assert.equal(recovered.sceneId, null);
+assert.equal(recovered.baseRevision, null);
+assert.equal(recovered.clientId, 'new-tab');
+assert.notEqual(recovered.draftId, draft.draftId);
+assert.throws(() => makeDraftPackage({...draft, formData:{unknown:'x'}}), /초안/);
+console.log('storage package tests passed');

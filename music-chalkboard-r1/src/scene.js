@@ -8,6 +8,11 @@ const UPM = GLYPHS.upm;
 const SPACE_EM = 0.3;
 const LETTER_EM = 0.035;
 
+/** 이 앱의 획 자료로 문장 전체를 표현할 수 있는지 검사한다. */
+export function hasGlyphs(text) {
+  return [...text].every((ch) => ch === " " || !!GLYPHS.glyphs[ch]);
+}
+
 /** 화면 방향별 크기와 자리(논리 단위) */
 export function metricsFor(portrait) {
   return portrait
@@ -37,6 +42,7 @@ function advanceOf(ch, k) {
 
 export function measureText(text, size) {
   const k = size / UPM;
+  if (!hasGlyphs(text)) return [...text].reduce((w, ch) => w + (ch === " " ? 0.32 : /[\x00-\x7f]/.test(ch) ? 0.6 : 1) * size, 0);
   let w = 0;
   for (const ch of text) w += advanceOf(ch, k);
   return w - LETTER_EM * size;
@@ -110,6 +116,11 @@ function placeGlyph(ch, x, baseY, size, seed, ink, id) {
 /** 글줄 하나를 글자 항목들로. align: left | center (기준 x) */
 function textRun(text, { x, baseY, size, align = "left", ink = "main", idPrefix, seed }) {
   const total = measureText(text, size);
+  // 글자가 하나라도 없으면 글줄 전체를 일반 글꼴로 표시한다.
+  if (!hasGlyphs(text)) {
+    const start = align === "center" ? x - total / 2 : x;
+    return [{ type: "text", id: idPrefix, text, x: start, baseY, size, ink }];
+  }
   let cx = align === "center" ? x - total / 2 : x;
   const k = size / UPM;
   const items = [];
@@ -270,6 +281,112 @@ export function buildScene(sceneKey, portrait) {
   // 나중에 쓸 수 있게 항목마다 일련번호를 매긴다
   items.forEach((it, i) => (it.index = i));
   return { key: sceneKey, ...m, items, clefBox: CLEF_BOX };
+}
+
+/** 저장된 장면 문서를 현재 방향의 그리기 항목으로 변환한다. */
+export function buildDocumentScene(doc, portrait) {
+  const m = metricsFor(portrait);
+  const { u, x0, x1 } = m;
+  // 높은 음과 낮은 음 모두 질문 및 설명 영역 안에 들어가도록 중앙에 배치한다.
+  const yb = portrait ? 324 : 315;
+  const seed = Number.isInteger(doc.renderSeed) ? doc.renderSeed : 1;
+  const groups = new Map();
+  const layoutErrors = [];
+  const put = (group, items) => {
+    for (const item of items) {
+      item.groupId = group;
+      // 복제된 장면의 외관은 원본과 동일하게 유지한다.
+      item.seedId = `${group}/${item.id}`;
+      item.id = `${doc.id}/${group}/${item.id}`;
+    }
+    groups.set(group, items);
+  };
+  const lineText = (group, text, x, y, size, ink = "main", align = "left") => {
+    if (!text) return;
+    const max = x1 - x0;
+    // 줄바꿈은 공백 및 문자 경계 기준. 어느 한 글자라도 미지원이면 문장 전체에 일반 글꼴을 쓴다.
+    const lines = [];
+    for (const source of text.split("\n")) {
+      let line = "";
+      for (const ch of source) {
+        if (line && measureText(line + ch, size) > max) { lines.push(line.trim()); line = ""; }
+        line += ch;
+      }
+      lines.push(line.trim());
+    }
+    if (group === "question" && lines.length > 2) layoutErrors.push({field: "question", message: "질문이 칠판을 벗어나요. 문장을 줄여 주세요."});
+    if (group === "caption" && lines.length > 3) layoutErrors.push({field: "caption", message: "정리 문장이 칠판을 벗어나요. 문장을 줄여 주세요."});
+    const fallback = !hasGlyphs(text.replace(/\n/g, ""));
+    const result = [];
+    lines.forEach((line, i) => {
+      if (!line) return;
+      const args = { x, baseY: y + i * size * 1.2, size, ink, align, idPrefix: `${group}/line${i}`, seed: seed + hashString(group) + i * 101 };
+      if (fallback && hasGlyphs(line)) {
+        const width = measureText(line, size), px = align === "center" ? x - width / 2 : x;
+        result.push({type: "text", id: args.idPrefix, text: line, x: px, baseY: args.baseY, size, ink});
+      } else result.push(...textRun(line, args));
+    });
+    put(group, result);
+  };
+  lineText("question", doc.question ? `Q. ${doc.question}` : "", x0, portrait ? 53 : 65, portrait ? 29 : 36);
+  lineText("caption", doc.caption, x0, portrait ? 527 : 526, portrait ? 25 : 28);
+  if (doc.templateId === "text-explanation") {
+    const blocks = doc.content.blocks;
+    let y = portrait ? 177 : 184;
+    const size = portrait ? 25 : 31;
+    for (const block of blocks) {
+      lineText(`body/${block.id}`, block.text, x0, y, size, block.ink);
+      const lines = groups.get(`body/${block.id}`) || [];
+      const lineCount = new Set(lines.map(item => item.type === "text" ? item.baseY : item.id.split("/").slice(0,-1).join("/"))).size || 1;
+      y += size * 1.2 * lineCount + 12;
+    }
+    if (y - 12 > (portrait ? 464 : 448)) layoutErrors.push({field: "content.blocks", message: "본문이 칠판을 벗어나요. 문장을 줄이거나 장면을 나눠 주세요."});
+  } else {
+    const staff = [0,1,2,3,4].map(i => lineStroke([[x0, yb-i*u], [x1,yb-i*u]], Math.max(2, .11*u), seed+101+i, .03*u));
+    put("staff", [{type:"line", role:"staff", id:"staff", ink:"main", strokes:staff, pen:2, parallel:true}]);
+    const clefLeft=x0+.9*u, gY=yb-u;
+    const cp=wobble(resample(clefUnits().map(([x,y])=>[clefLeft+x*u,gY+y*u]),2.5),.03*u,seed+202,90), cc=cumulative(cp);
+    put("clef", [{type:"line",role:"clef",id:"clef",ink:"main",strokes:[{pts:cp,cum:cc,len:cc[cc.length-1],width:Math.max(3,.19*u)}],pen:0}]);
+    const notes=doc.content.notes;
+    const chord=doc.templateId === "chord-stack";
+    const spots=[];
+    notes.forEach((note,i)=>{
+      const cx=chord ? x0+(x1-x0)*.62 : x0+6*u+(x1-x0-8.5*u)*i/Math.max(1,notes.length-1);
+      const idx=diatonicIndex(note.pitch), cy=noteY(note.pitch,yb,u), id=`note/${note.id}`, elements=[];
+      for(const li of ledgerIndices(idx)) {
+        const ly=yb-(li-30)*u/2, half=1.26*u;
+        elements.push({type:"line",role:"ledger",id:`ledger${li}`,ink:"main",strokes:[lineStroke([[cx-half,ly],[cx+half,ly]],Math.max(2,.13*u),seed+li*13,.05*u)],pen:0});
+      }
+      elements.push({type:"line",role:"head",id:"head",ink:"main",strokes:[headStroke(cx,cy,u,seed+idx*31+i)],pen:0,noteName:note.pitch});
+      put(id,elements); spots.push({cx,cy});
+      if (!chord && doc.content.showLabels) {
+        const label=({C:"도",D:"레",E:"미",F:"파",G:"솔",A:"라",B:"시"})[note.pitch[0]];
+        lineText(`label/${note.id}`,label,cx,yb+3.1*u,1.15*u,"main","center");
+      }
+    });
+    const addCircle=(group,cx,cy,rx,ry)=>put(group,[{type:"line",role:"circle",id:"circle",ink:"accent",strokes:[circleStroke(cx,cy,rx,ry,u,seed+606)],pen:0}]);
+    if (chord) {
+      const cx=spots[0].cx;
+      lineText("name",doc.content.chordName,cx,yb+3*u,1.25*u,"main","center");
+      lineText("roman",doc.content.roman,cx,yb+4.5*u,u,"dim","center");
+      if (doc.content.emphasis) addCircle("emphasis/chord",cx,(spots[0].cy+spots[2].cy)/2,1.45*u,Math.abs(spots[0].cy-spots[2].cy)/2+1.05*u);
+    } else {
+      notes.forEach((note,i)=>{ if(doc.content.highlightNoteIds.includes(note.id)) addCircle(`emphasis/${note.id}`,spots[i].cx,spots[i].cy,1.45*u,1.05*u); });
+    }
+  }
+  const items=[];
+  for (const step of doc.steps) {
+    const ids=[...step.groupIds];
+    // 같은 단계 내에서는 오선, 음자리표, 음표, 강조 순서를 보장한다.
+    const priority=id=>id==="staff"?0:id==="clef"?1:id.startsWith("note/")?2:id.startsWith("emphasis/")?4:3;
+    ids.sort((a,b)=>priority(a)-priority(b));
+    for (const id of ids) {
+      if (!groups.has(id)) throw new Error(`표시할 수 없는 그룹: ${id}`);
+      items.push(...groups.get(id));
+    }
+  }
+  items.forEach((item,index)=>item.index=index);
+  return {key:doc.id, ...m, items, groups, layoutErrors, clefBox:CLEF_BOX};
 }
 
 export { catmullRom };

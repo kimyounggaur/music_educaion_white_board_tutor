@@ -83,3 +83,24 @@ h2 { font-size: 14px; margin: 0 0 8px; }
   .board-area { padding: 4px; }
 }
 @media (prefers-reduced-motion: reduce) { .hand, .hand-shadow { will-change: auto; } }
+.scene-indicator { flex: 1 1 140px; min-width: 0; display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
+.scene-indicator strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.menu-actions { display: grid; gap: 4px; width: min(260px, calc(100vw - 24px)); }
+.menu-actions button { width: 100%; min-height: 42px; border: 0; border-radius: 7px; text-align: left; padding: 8px 10px; background: transparent; color: var(--ink); font: inherit; cursor: pointer; }
+.menu-actions button:hover, .menu-actions button:focus-visible { background: #e7f0eb; }
+.menu-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.menu-actions hr { border: 0; border-top: 1px solid var(--line); width: 100%; }
+.menu-actions select, .info select { min-height: 40px; font: inherit; }
+[hidden] { display: none !important; }
+@media (max-width: 700px) { .brand { width: auto; } .scene-indicator { flex: 1; } .header-nav { width: 100%; } }
+
+.draft-dialog { width:min(680px,95vw); border:0; border-radius:16px; padding:24px; color:var(--ink); max-height:85dvh; }
+.draft-dialog::backdrop { background:#10241dcc; }
+.draft-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:10px 0; border-bottom:1px solid var(--line); }
+.draft-row span { flex:1 1 230px; }
+.draft-dialog button { min-height:42px; padding:8px 12px; margin:4px; font:inherit; border:1px solid var(--line); border-radius:8px; background:white; cursor:pointer; }
+
+.header-search { display:flex; flex:0 1 210px; min-width:130px; }
+.header-search input { width:100%; min-width:0; min-height:42px; border:1px solid var(--line); border-radius:9px 0 0 9px; padding:7px 10px; font:inherit; }
+.header-search button { min-height:42px; border:1px solid var(--line); border-left:0; background:#fff; border-radius:0 9px 9px 0; padding:6px 10px; font:inherit; cursor:pointer; }
+@media(max-width:700px) { .header-search { order:3; flex:1 1 100%; } }
