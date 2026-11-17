@@ -1,0 +1,43 @@
+{
+  "name": "music-chalkboard",
+  "version": "0.1.0",
+  "description": "음악 칠판(가칭): 교사가 교실 화면에 띄워 쓰는 음악 수업용 칠판",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "dev": "next dev",
+    "validate": "tsx scripts/validate-lessons.ts",
+    "build": "npm run validate && next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "e2e": "NEXT_PUBLIC_DEV_LESSONS=1 npm run build && npm run build:standalone && playwright test",
+    "e2e:run": "playwright test",
+    "build:standalone": "node scripts/build-standalone.mjs"
+  },
+  "private": true,
+  "dependencies": {
+    "next": "15.5.29",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vexflow": "5.2.0",
+    "zod": "4.6.7",
+    "zustand": "5.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@tailwindcss/postcss": "4.3.5",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.2",
+    "postcss": "8.5.33",
+    "tailwindcss": "4.3.5",
+    "tonal": "6.6.0",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  }
+}
