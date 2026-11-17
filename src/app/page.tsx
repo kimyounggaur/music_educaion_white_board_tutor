@@ -11,23 +11,28 @@ export default function PickerPage() {
 
   return (
     <main className="picker">
-      <div className="picker-head">
-        <div>
-          <h1>음악 칠판</h1>
-          <p className="lead">
-            교실 화면에서 선생님이 한 단계씩 넘기며 쓰는 음악 이론 수업이에요. 오선보와 건반, 소리를 함께 보여 줘요.
-          </p>
-        </div>
-        <ThemeToggle />
-      </div>
+      <div className="picker-frame">
+        <div className="picker-surface">
+          <div className="picker-head">
+            <div className="picker-intro">
+              <p className="picker-eyebrow">MUSIC LESSON BOARD</p>
+              <h1>음악 칠판</h1>
+              <p className="lead">
+                교실 화면에서 선생님이 한 단계씩 넘기며 쓰는 음악 이론 수업이에요.<br className="picker-desktop-break" /> 오선보와 건반, 소리를 함께 보여 줘요.
+              </p>
+            </div>
+            <ThemeToggle />
+          </div>
+          <div className="picker-divider" aria-hidden="true"><span /><span /><span /></div>
 
       {groups.map(({ grade, items }) => (
         <section key={grade} className="group" aria-labelledby={`g-${grade}`}>
-          <h2 id={`g-${grade}`}>{GRADE_LABEL[grade]}</h2>
+          <div className="picker-group-heading"><h2 id={`g-${grade}`}>{GRADE_LABEL[grade]}</h2><span>{items.length}개 수업</span></div>
           <ul className="cards">
-            {items.map((lesson) => (
+            {items.map((lesson, index) => (
               <li key={lesson.id}>
                 <LessonLink id={lesson.id} className="card">
+                  <div className="card-top" aria-hidden="true"><span className="card-number">{String(index + 1).padStart(2, "0")}</span><span className="card-arrow">↗</span></div>
                   <h3>{lesson.title}</h3>
                   {lesson.subtitle ? <p className="sub">{lesson.subtitle}</p> : null}
                   <p className="meta">
@@ -49,6 +54,9 @@ export default function PickerPage() {
         <br />
         소리가 나지 않으면 기기의 볼륨을 올리고, 아이폰은 옆면의 무음 스위치를 확인해 주세요. 교실 컴퓨터는 스피커 연결을 확인해 주세요.
       </p>
+        </div>
+        <svg className="picker-marker-tray" viewBox="44 315 362 30" preserveAspectRatio="none" aria-hidden="true" focusable="false"><image href="/whiteboard-reference.svg" x="0" y="0" width="450" height="450" /></svg>
+      </div>
     </main>
   );
 }

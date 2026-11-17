@@ -10,6 +10,8 @@ test("수업 고르기: 수업 4편이 보이고 누르면 수업 화면으로 �
     await expect(page.getByRole("heading", { level: 3, name: lesson.title })).toBeVisible();
   }
   await expect(page.locator("a.card")).toHaveCount(lessons.length);
+  // 좁은 화면에서도 수업 선택 화면 전체가 가로로 잘리지 않아야 한다.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole("link", { name: /다장조 음계/ }).click();
   await expect(page).toHaveURL(/\/lesson\/c-major-scale/);
   await expect(page.locator("svg.staff .stave")).toBeVisible();
@@ -18,14 +20,14 @@ test("수업 고르기: 수업 4편이 보이고 누르면 수업 화면으로 �
 
 test("칠판/화이트보드 색을 바꾸면 저장되어 다시 열어도 유지된다", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "chalk");
-  await page.getByRole("button", { name: "화이트보드" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "white");
-  await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "white");
-  await expect(page.getByRole("button", { name: "화이트보드" })).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "칠판", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "chalk");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "chalk");
+  await expect(page.getByRole("button", { name: "칠판", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "화이트보드" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "white");
 });
 
 test("없는 수업 주소는 안내 화면(404)", async ({ page }) => {
