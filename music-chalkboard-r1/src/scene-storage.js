@@ -55,22 +55,43 @@ function assertDraft(draft) {
   inspectTree(draft);
   checkSize(draft);
   const form = draft.formData;
-  const max = (value, limit) => {
-    if (value === undefined) return true;
-    if (typeof value !== 'string') return false;
+  const required = (object, keys) => isObject(object) && only(object, keys) && keys.every(key => Object.hasOwn(object, key));
+  const count = value => {
     const normal = value.normalize('NFC');
-    const count = typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter('ko', {granularity:'grapheme'}).segment(normal)].length : [...normal].length;
-    return count <= limit;
+    return typeof Intl.Segmenter === 'function' ? [...new Intl.Segmenter('ko', {granularity:'grapheme'}).segment(normal)].length : [...normal].length;
   };
+  const max = (value, limit) => typeof value === 'string' && count(value) <= limit;
+  const isId = value => max(value, 128);
+  // A draft may be semantically invalid while the user is editing, but its
+  // complete structure must be safe to render without executing user data.
+  if (!required(form, [...FORM_KEYS]) || !['chord-stack','note-selection','text-explanation'].includes(form.templateId) || form.templateVersion !== 1)
+    fail('invalid', '초안의 템플릿 또는 필드가 올바르지 않습니다.');
   if (!max(form.title,40) || !max(form.question,80) || !max(form.caption,120)) fail('invalid', '초안의 문장이 길이 제한을 넘었습니다. 내용을 복사한 뒤 줄여 주세요.');
-  if (form.tags !== undefined && (!Array.isArray(form.tags) || form.tags.length > 5 || form.tags.some(tag => !max(tag,12)))) fail('invalid', '초안의 태그가 제한을 넘었습니다.');
-  if (form.steps !== undefined && (!Array.isArray(form.steps) || form.steps.length > 12 || form.steps.some(s => !isObject(s) || !only(s,['id','label','groupIds','advance','holdMs']) || !max(s.label,24) || (s.groupIds !== undefined && (!Array.isArray(s.groupIds) || s.groupIds.length > 100))))) fail('invalid', '초안의 단계가 제한을 넘었습니다.');
-  if (form.content !== undefined) {
-    const c = form.content;
-    if (!isObject(c) || !only(c,['preset','notes','chordName','roman','emphasis','showLabels','highlightNoteIds','blocks']) || !max(c.chordName,20) || !max(c.roman,20)) fail('invalid', '초안 내용이 올바르지 않습니다.');
-    if (c.notes !== undefined && (!Array.isArray(c.notes) || c.notes.length > 8 || c.notes.some(n => !isObject(n) || !only(n,['id','pitch'])))) fail('invalid', '초안의 음이 제한을 넘었습니다.');
-    if (c.highlightNoteIds !== undefined && (!Array.isArray(c.highlightNoteIds) || c.highlightNoteIds.length > 8)) fail('invalid', '초안의 강조 음이 제한을 넘었습니다.');
-    if (c.blocks !== undefined && (!Array.isArray(c.blocks) || c.blocks.length > 6 || c.blocks.some(b => !isObject(b) || !only(b,['id','text','ink']) || !max(b.text,80)))) fail('invalid', '초안의 본문이 제한을 넘었습니다.');
+  if (!Array.isArray(form.tags) || form.tags.length > 5 || form.tags.some(tag => !max(tag,12))) fail('invalid', '초안의 태그가 제한을 넘었습니다.');
+  if (!Array.isArray(form.steps) || form.steps.length > 12 || form.steps.some(s =>
+    !required(s,['id','label','groupIds','advance','holdMs']) || !isId(s.id) || !max(s.label,24) ||
+    !Array.isArray(s.groupIds) || s.groupIds.length > 100 || s.groupIds.some(group => !max(group,256)) ||
+    !['manual','auto'].includes(s.advance) || typeof s.holdMs !== 'number' || !Number.isFinite(s.holdMs)))
+    fail('invalid', '초안의 단계 형식이 올바르지 않습니다.');
+  const c = form.content;
+  const notesOk = notes => Array.isArray(notes) && notes.length <= 8 && notes.every(n =>
+    required(n,['id','pitch']) && isId(n.id) && max(n.pitch, 20));
+  if (form.templateId === 'chord-stack') {
+    if (!required(c,['preset','notes','chordName','roman','emphasis']) ||
+      !['custom','C-major-I','C-major-IV','C-major-V'].includes(c.preset) ||
+      !notesOk(c.notes) || !max(c.chordName,20) || !max(c.roman,20) || typeof c.emphasis !== 'boolean')
+      fail('invalid', '초안의 화음 내용이 올바르지 않습니다.');
+  } else if (form.templateId === 'note-selection') {
+    if (!required(c,['notes','showLabels','highlightNoteIds']) || !notesOk(c.notes) ||
+      typeof c.showLabels !== 'boolean' || !Array.isArray(c.highlightNoteIds) ||
+      c.highlightNoteIds.length > 8 || c.highlightNoteIds.some(id => !isId(id)))
+      fail('invalid', '초안의 음 고르기 내용이 올바르지 않습니다.');
+  } else {
+    if (!required(c,['blocks']) || !Array.isArray(c.blocks) || c.blocks.length > 6 || c.blocks.some(b =>
+      !required(b,['id','text','ink']) || !isId(b.id) || !max(b.text,80) || !['main','accent'].includes(b.ink)))
+      fail('invalid', '초안의 본문 형식이 올바르지 않습니다.');
+    if (c.blocks.reduce((total, block) => total + count(block.text), 0) > 360)
+      fail('invalid', '초안 본문이 길이 제한을 넘었습니다.');
   }
 }
 

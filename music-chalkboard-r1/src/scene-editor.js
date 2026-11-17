@@ -14,11 +14,12 @@ const style = `
 `;
 
 /** Opens an isolated draft. Callbacks are async-capable; a rejected save never closes it. */
-export function openSceneEditor({scene, onSave, onPreview, onDraft, onDiscard, onExportDraft, onClose, isNew = false, allowTemplateChange = false} = {}) {
+export function openSceneEditor({scene, onSave, onPreview, onDraft, onDiscard, onExportDraft, onClose, isNew = false, allowTemplateChange = false, preserveInitialDraft = false} = {}) {
   if (!scene) throw new Error('편집할 장면이 필요합니다.');
   const original = clone(scene);
   let draft = clone(scene), timer = null, status = '', dirty = false, busy = false, errorList = [], closing = false;
-  let tab = 'content', draftQueue = Promise.resolve();
+  let tab = 'content', draftQueue = Promise.resolve(), cleanupRequired = false, autosaveQueued = false, autosaveVersion = 0;
+  const restoreBaselineDraft = () => preserveInitialDraft && onDraft ? onDraft(clone(original)) : onDiscard?.(clone(draft));
   const dialog = document.createElement('dialog');
   dialog.className = 'scene-editor';
   dialog.setAttribute('aria-label', isNew ? '새 장면' : '장면 편집');
@@ -28,12 +29,26 @@ export function openSceneEditor({scene, onSave, onPreview, onDraft, onDiscard, o
   }
   const syncSteps = () => { const result = reconcileSteps(draft); if (Array.isArray(result)) draft.steps = result; };
   const scheduleDraft = () => {
+    const wasDirty = dirty;
     dirty = JSON.stringify(draft) !== JSON.stringify(original);
     clearTimeout(timer);
-    if (!onDraft || !dirty) return;
+    if (!dirty) {
+      // Remove an earlier autosave after reverting to the opening state. Queue
+      // this after any in-flight write so that the old version cannot reappear.
+      if (wasDirty && autosaveQueued && (onDiscard || (preserveInitialDraft && onDraft))) {
+        cleanupRequired = true;
+        const cleanupVersion = autosaveVersion;
+        draftQueue = draftQueue.catch(() => {}).then(restoreBaselineDraft).then(() => {
+          cleanupRequired = false; autosaveQueued = autosaveVersion > cleanupVersion; status = '변경 사항이 없어 초안을 정리했습니다.';
+        }, () => { cleanupRequired = true; status = '이전 초안을 삭제하지 못했어요. 닫기 전에 다시 시도합니다.'; });
+        draftQueue.then(updateStatus);
+      }
+      return;
+    }
+    if (!onDraft) return;
     status = '초안 저장 대기 중'; updateStatus();
     const snapshot = clone(draft);
-    timer = setTimeout(() => { draftQueue = draftQueue.catch(() => {}).then(() => onDraft(snapshot)).then(() => { status = '초안 저장됨'; }, () => { status = '초안을 저장하지 못했어요. 입력 내용은 유지됩니다.'; }); draftQueue.then(updateStatus); }, 800);
+    timer = setTimeout(() => { autosaveQueued = true; autosaveVersion++; draftQueue = draftQueue.catch(() => {}).then(() => onDraft(snapshot)).then(() => { status = '초안 저장됨'; }, () => { status = '초안을 저장하지 못했어요. 입력 내용은 유지됩니다.'; }); draftQueue.then(updateStatus); }, 800);
   };
   const updateStatus = () => { const el = dialog.querySelector('.ed-status'); if (el) el.textContent = status; };
   const check = () => { const result = validateScene(draft); errorList = result.errors || []; return !!result.valid; };
@@ -72,8 +87,20 @@ export function openSceneEditor({scene, onSave, onPreview, onDraft, onDiscard, o
     draft.content.roman = preset.roman ?? '';
   };
   const setBusy = value => { busy = value; if(value) dialog.querySelectorAll('button,input,select,textarea').forEach(control=>control.disabled=true); else render(); };
-  const finish = async discarded => { clearTimeout(timer); await draftQueue; if (discarded && onDiscard) await onDiscard(clone(draft)); dialog.close(); dialog.remove(); onClose?.({discarded}); };
-  const requestClose = () => { if (!dirty) { finish(false); return; } closing = true; dialog.querySelector('.ed-close-options').hidden = false; dialog.querySelector('[data-action="continue"]').focus(); };
+  const finish = async discarded => {
+    clearTimeout(timer); await draftQueue;
+    if (discarded && onDiscard) { await onDiscard(clone(draft)); cleanupRequired = false; }
+    else if (!dirty && cleanupRequired) { await restoreBaselineDraft(); cleanupRequired = false; }
+    dialog.close(); dialog.remove(); onClose?.({discarded});
+  };
+  const requestClose = async () => {
+    if (!dirty) {
+      try { setBusy(true); await finish(false); }
+      catch { setBusy(false); status = '이전 초안을 삭제하지 못했어요. 다시 시도해 주세요.'; updateStatus(); }
+      return;
+    }
+    closing = true; dialog.querySelector('.ed-close-options').hidden = false; dialog.querySelector('[data-action="continue"]').focus();
+  };
   const move = (array, i, delta) => { const j=i+delta; if (i<0||j<0||j>=array.length) return; [array[i],array[j]]=[array[j],array[i]]; };
   dialog.addEventListener('input', event => {
     const t = event.target;
@@ -126,7 +153,7 @@ export function openSceneEditor({scene, onSave, onPreview, onDraft, onDiscard, o
         } catch(err) {
           clearTimeout(timer);
           let draftSaved=false;
-          try { await draftQueue; if(onDraft) { await onDraft(clone(draft)); draftSaved=true; } } catch { /* 편집창과 내보내기 대안 유지 */ }
+          try { await draftQueue; if(onDraft) { autosaveQueued=true; autosaveVersion++; await onDraft(clone(draft)); draftSaved=true; } } catch { /* 편집창과 내보내기 대안 유지 */ }
           status=(err?.message||'저장하지 못했어요.')+(draftSaved?' 최신 입력은 초안으로 저장했습니다.':' 초안도 저장하지 못했어요. 입력 내용은 유지되며 초안 파일로 내보낼 수 있습니다.');
           setBusy(false); updateStatus();
         }

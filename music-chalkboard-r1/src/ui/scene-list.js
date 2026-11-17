@@ -79,14 +79,14 @@ export function openSceneList(options) {
   header.append(toolbar);
   const tabs = document.createElement('div'); tabs.className = 'wb-tabs'; tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '장면 분류');
   const tabButtons = {};
-  for (const [key, label] of [['builtin','기본 장면'],['user','내 장면'],['trash','휴지통']]) {
+  for (const [key, label] of [['all','전체 검색'],['builtin','기본 장면'],['user','내 장면'],['trash','휴지통']]) {
     const el = button(label, () => { tab = key; render(); }); el.setAttribute('role', 'tab'); tabButtons[key] = el; tabs.append(el);
   }
   tabs.addEventListener('keydown', (event) => {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
     event.preventDefault();
-    const keys = ['builtin', 'user', 'trash'];
-    tab = keys[(keys.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : 2)) % keys.length];
+    const keys = ['all', 'builtin', 'user', 'trash'];
+    tab = keys[(keys.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length];
     render(); tabButtons[tab].focus();
   });
   header.append(tabs); dialog.append(header);
@@ -98,7 +98,7 @@ export function openSceneList(options) {
   const error = document.createElement('p'); error.className = 'wb-error'; error.setAttribute('role','alert');
   const list = document.createElement('ul'); list.setAttribute('aria-label','장면 목록');
   content.append(actions, hint, error, list); dialog.append(content); document.body.append(dialog);
-  let tab = options.initialTab || 'builtin', dataset = {builtins:[], scenes:[], order:[]}, timer = 0, composing = false;
+  let tab = options.initialTab || (normalize(options.query) ? 'all' : 'builtin'), dataset = {builtins:[], scenes:[], order:[]}, timer = 0, composing = false, showAllResults = false;
   let closed = false;
   dialog.addEventListener('close', () => { closed = true; clearTimeout(timer); dialog.remove(); if (previousFocus && previousFocus.isConnected) previousFocus.focus(); if (options.onClose) options.onClose(); });
   dialog.addEventListener('cancel', () => {});
@@ -119,12 +119,14 @@ export function openSceneList(options) {
     for (const [key, el] of Object.entries(tabButtons)) { el.setAttribute('aria-selected', String(key === tab)); el.tabIndex = key === tab ? 0 : -1; }
     const order = dataset.order || [];
     const orderMap = new Map(order.map((id, i) => [id, i]));
-    let all = tab === 'builtin' ? [...(dataset.builtins || [])] : (dataset.scenes || []).filter((s) => tab === 'trash' ? !!s.deletedAt : !s.deletedAt);
+    let all = tab === 'all' ? [...(dataset.builtins || []), ...(dataset.scenes || []).filter(s => !s.deletedAt)] : tab === 'builtin' ? [...(dataset.builtins || [])] : (dataset.scenes || []).filter((s) => tab === 'trash' ? !!s.deletedAt : !s.deletedAt);
     if (sort.value === 'updated') all.sort((a,b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
     else if (sort.value === 'title') all.sort((a,b) => (a.title || '').localeCompare(b.title || '', 'ko'));
     else if (tab === 'user') all.sort((a,b) => (orderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (orderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER));
-    const filtered = searchScenes(all, search.value);
-    const ids = filtered.map((s) => s.id);
+    const results = searchScenes(all, search.value);
+    const limited = !!normalize(search.value) && !showAllResults && results.length > 30;
+    const filtered = limited ? results.slice(0, 30) : results;
+    const ids = results.map((s) => s.id);
     const reorderable = tab === 'user' && sort.value === 'manual' && !normalize(search.value) && !!options.onReorder;
     hint.textContent = tab === 'trash' ? '휴지통의 장면은 검색과 일반 목록에 나타나지 않습니다.' : reorderable ? '위·아래 버튼으로 장면 순서를 바꿀 수 있습니다.' : '검색하거나 정렬해도 저장된 순서는 바뀌지 않습니다.';
     list.replaceChildren();
@@ -154,8 +156,13 @@ export function openSceneList(options) {
       }
       row.append(info,commands); list.append(row);
     });
+    if (limited) {
+      const row = document.createElement('li');
+      const more = button(`전체 목록 열기 (${results.length}개 결과)`, () => { showAllResults = true; render(); });
+      row.append(more); list.append(row);
+    }
   }
-  function updateSearch() { clearTimeout(timer); if (!composing) timer = setTimeout(render, 150); }
+  function updateSearch() { clearTimeout(timer); if (!composing) { showAllResults = false; if (normalize(search.value) && tab !== 'trash') tab = 'all'; timer = setTimeout(render, 150); } }
   search.addEventListener('compositionstart', () => { composing = true; clearTimeout(timer); });
   search.addEventListener('compositionend', () => { composing = false; updateSearch(); });
   search.addEventListener('input', updateSearch);

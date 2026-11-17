@@ -28,6 +28,18 @@ const ed=document.querySelector('dialog.scene-editor');ed.querySelector('[data-a
 assert.match(document.querySelector('#sceneTitle').textContent,/미리보기/);assert.equal(document.querySelector('#sceneMenu').inert,true);
 document.querySelector('#returnPreview').click();assert.equal(document.querySelector('#sceneTitle').textContent,'자동 시험 장면');assert.ok(ed.open);
 ed.querySelector('[data-action="close"]').click();await new Promise(resolve=>setTimeout(resolve,10));
+const {openSceneStorage}=await import('../src/scene-storage.js');
+const store=await openSceneStorage(), [stored]=await store.listScenes();
+const formData=Object.fromEntries(['title','tags','question','caption','templateId','templateVersion','content','steps'].map(k=>[k,structuredClone(stored[k])]));
+await store.saveDraft({draftId:'recovered-draft',sceneId:stored.id,baseRevision:stored.revision,editorVersion:1,updatedAt:new Date().toISOString(),formData});
+document.querySelector('#recoverDraft').click();await waitFor(()=>document.querySelector('.draft-dialog'));
+document.querySelector('.draft-row button').click();await waitFor(()=>document.querySelector('dialog.scene-editor')?.open);
+const recovered=document.querySelector('dialog.scene-editor'), recoveredTitle=recovered.querySelector('#ed-title');
+recoveredTitle.value='복구한 장면';recoveredTitle.dispatchEvent(new win.Event('input',{bubbles:true}));
+await new Promise(resolve=>setTimeout(resolve,900));
+assert.equal((await store.listDrafts()).length,1,'복구 초안은 기존 ID로 갱신되어야 합니다');
+recovered.querySelector('[data-action="save"]').click();await waitFor(()=>!document.querySelector('dialog.scene-editor'));
+assert.equal((await store.listDrafts()).length,0,'저장 후 복구 초안이 제거되어야 합니다');store.close();
 document.querySelector('#openScenes').click();await waitFor(()=>document.querySelector('dialog.wb-scenes')?.open);
 assert.ok(document.querySelector('dialog.wb-scenes')?.open);
 console.log('앱 초기화·새 템플릿 선택·저장·장면 목록 통합 테스트 통과');

@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {createScene} from '../src/scene-model.js';
+import {splitBackupScenes} from '../src/backup-chunks.js';
+import {MAX_FILE_BYTES} from '../src/scene-storage.js';
+const source=createScene();
+const scenes=Array.from({length:1000},(_,i)=>({...structuredClone(source),id:`sample-${i}`}));
+const packages=splitBackupScenes(scenes,{playMode:'step'});
+assert.deepEqual(packages.map(p=>p.scenes.length),[500,500]);
+assert.deepEqual(packages.flatMap(p=>p.scenes.map(s=>s.id)),scenes.map(s=>s.id));
+for(const p of packages)assert.ok(new TextEncoder().encode(JSON.stringify(p)).length<=MAX_FILE_BYTES);
+console.log('1,000개 장면 분할 백업과 순서 테스트 통과');

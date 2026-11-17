@@ -4,6 +4,7 @@ import { openSceneStorage, makeScenePackage, makeDraftPackage, recoverImportedDr
 import { openSceneEditor } from './scene-editor.js';
 import { openSceneList } from './ui/scene-list.js';
 import { ScenePlayer } from './player.js';
+import { splitBackupScenes } from './backup-chunks.js';
 
 const $=s=>document.querySelector(s);
 const byId=id=>document.getElementById(id);
@@ -45,27 +46,44 @@ function download(value,name) {
 }
 function filename(scene){return (scene.title || '장면').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').slice(0,40);}
 const exportScene=scene=>download(makeScenePackage([scene]),`${filename(scene)}.json`);
-async function exportAll(){if(!storage)throw Error('저장소를 사용할 수 없습니다.');const scenes=await storage.listScenes();if(!scenes.length)throw Error('백업할 내 장면이 없습니다.');download(makeScenePackage(scenes),'음악칠판_전체백업.json');}
+async function exportAll(){
+  if(!storage)throw Error('저장소를 사용할 수 없습니다.'); player.pause();closeMenus();
+  const dialog=document.createElement('dialog');dialog.className='draft-dialog';dialog.setAttribute('aria-label','전체 백업');
+  const h=document.createElement('h2');h.textContent='전체 백업';
+  const message=document.createElement('p');message.textContent='필요한 항목을 선택하고 백업 파일을 저장하세요.';
+  const trashLabel=document.createElement('label'),trash=document.createElement('input');trash.type='checkbox';trashLabel.append(trash,document.createTextNode(' 휴지통 포함'));
+  const settingLabel=document.createElement('label'),setting=document.createElement('input');setting.type='checkbox';settingLabel.append(setting,document.createTextNode(' 보기 설정 포함'));
+  const results=document.createElement('div'),prepare=document.createElement('button'),close=document.createElement('button');prepare.textContent='백업 파일 준비';close.textContent='닫기';
+  close.onclick=()=>{dialog.close();dialog.remove();};
+  prepare.onclick=async()=>{try{
+    results.replaceChildren();const scenes=await storage.listScenes({includeDeleted:trash.checked});if(!scenes.length)throw Error('백업할 내 장면이 없습니다.');
+    const settings=setting.checked?{viewOptions:await storage.getSetting('viewOptions')||null,playMode:await storage.getSetting('playMode')||'step'}:null;
+    const packages=splitBackupScenes(scenes,settings);
+    const note=document.createElement('p');note.textContent=`${scenes.length}개 장면을 ${packages.length}개 파일로 준비했습니다. 각 파일을 모두 저장하세요.`;results.append(note);
+    packages.forEach((pkg,i)=>{const b=document.createElement('button');b.textContent=`백업 ${i+1}/${packages.length} 저장 (${pkg.scenes.length}개)`;b.onclick=()=>download(pkg,`음악칠판_전체백업_${i+1}.json`);results.append(b);});
+  }catch(e){results.textContent=e.message;}};
+  dialog.append(h,message,trashLabel,document.createElement('br'),settingLabel,document.createElement('br'),prepare,close,results);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove(),{once:true});dialog.showModal();prepare.focus();
+}
 function layoutCheck(scene) {for(const portrait of [false,true]) {const problems=buildDocumentScene(scene,portrait).layoutErrors || [];if(problems.length)throw Error(`${portrait?'세로':'가로'} 화면: ${problems.map(p=>p.message||String(p)).join(' ')}`);}}
-function draftRecord(snapshot,baseRevision,isNew) {
+function draftRecord(snapshot,baseRevision,isNew,draftId = `${clientId}:${snapshot.id}`) {
   const formData=Object.fromEntries(fields.map(k=>[k,structuredClone(snapshot[k])]));
-  return {draftId:`${clientId}:${snapshot.id}`,sceneId:isNew?null:snapshot.id,baseRevision:isNew?null:baseRevision,editorVersion:1,updatedAt:new Date().toISOString(),formData,clientId};
+  return {draftId,sceneId:isNew?null:snapshot.id,baseRevision:isNew?null:baseRevision,editorVersion:1,updatedAt:new Date().toISOString(),formData,clientId};
 }
 function cloneDoc(source) {const copy=structuredClone(source);copy.id=uuid();copy.origin='user';copy.revision=1;copy.deletedAt=null;copy.title=`${source.title}`.slice(0,34)+' 사본';copy.createdAt=copy.updatedAt=new Date().toISOString();delete copy.importInfo;return copy;}
 async function editDoc(original,isNew=false,allowTemplateChange=false,recoveredDraft=null) {
-  player.pause(); closeMenus(); const lessonSnapshot=player.snapshot(), lessonDoc=structuredClone(current); let doc=structuredClone(original), saved=false;
+  player.pause(); closeMenus(); const lessonSnapshot=player.snapshot(), lessonDoc=structuredClone(current); let doc=structuredClone(original), saved=false, initialDraftLoaded=!!recoveredDraft;
   let draftId=recoveredDraft?.draftId || `${clientId}:${doc.id}`;
   let baseRevision=isNew?null:original.revision;
   if(recoveredDraft){baseRevision=recoveredDraft.baseRevision;Object.assign(doc,structuredClone(recoveredDraft.formData));}
-  else if(storage) {const draft=await storage.getDraft(draftId);if(draft && confirm('저장되지 않은 초안이 있습니다. 초안을 이어서 편집할까요?')) {Object.assign(doc,structuredClone(draft.formData));baseRevision=draft.baseRevision;}}
-  openSceneEditor({scene:doc,isNew,allowTemplateChange,
+  else if(storage) {const draft=await storage.getDraft(draftId);if(draft && confirm('저장되지 않은 초안이 있습니다. 초안을 이어서 편집할까요?')) {Object.assign(doc,structuredClone(draft.formData));baseRevision=draft.baseRevision;initialDraftLoaded=true;}}
+  openSceneEditor({scene:doc,isNew,allowTemplateChange,preserveInitialDraft:initialDraftLoaded,
     onSave:async snapshot=>{layoutCheck(snapshot);if(!storage)throw Error('저장소를 사용할 수 없습니다. 브라우저 저장 설정을 확인해 주세요.');
       try {const result=await storage.saveScene(snapshot,{expectedRevision:baseRevision,draftId});saved=true;await openDoc(result);status('장면을 저장했습니다.');}
       catch(error){if(error.code==='conflict'){if(confirm('다른 탭에서 원본이 변경되었습니다. 현재 내용을 새 장면 사본으로 저장할까요?')){const copy=cloneDoc(snapshot);const result=await storage.saveScene(copy,{expectedRevision:null,draftId});saved=true;await openDoc(result);status('변경 내용을 새 장면 사본으로 저장했습니다.');return;} throw Error('저장 충돌이 발생했습니다. 초안을 유지하거나 파일로 내보낼 수 있습니다.');}throw error;}
     },
-    onDraft:async snapshot=>{if(!storage)throw Error('저장소를 사용할 수 없습니다.'); await storage.saveDraft(draftRecord(snapshot,baseRevision,isNew));},
+    onDraft:async snapshot=>{if(!storage)throw Error('저장소를 사용할 수 없습니다.'); await storage.saveDraft(draftRecord(snapshot,baseRevision,isNew,draftId));},
     onDiscard:async()=>{if(storage)await storage.deleteDraft(draftId);},
-    onExportDraft:snapshot=>download(makeDraftPackage(draftRecord(snapshot,baseRevision,isNew)),`${filename(snapshot)}_초안.json`),
+    onExportDraft:snapshot=>download(makeDraftPackage(draftRecord(snapshot,baseRevision,isNew,draftId)),`${filename(snapshot)}_초안.json`),
     onPreview:async(snapshot,{startStep,returnToEditor})=>{layoutCheck(snapshot);byId('sceneMenu').inert=true;byId('sceneSearchForm').inert=true;previewReturn=()=>{byId('sceneMenu').inert=false;byId('sceneSearchForm').inert=false;current=lessonDoc;byId('sceneTitle').textContent=lessonDoc.title;byId('sceneTitle').title=lessonDoc.title;player.restore(lessonSnapshot);returnToEditor();};byId('returnPreview').hidden=false;byId('returnPreview').focus();await openDoc(snapshot,{remember:false});player.previewFrom(startStep);byId('sceneTitle').textContent=`미리보기 · 저장 전 · ${snapshot.title}`;},
     onClose:async()=>{if(previewReturn){previewReturn=null;byId('sceneMenu').inert=false;byId('sceneSearchForm').inert=false;byId('returnPreview').hidden=true;} if(!saved && current?.id!==lessonDoc?.id){current=lessonDoc;byId('sceneTitle').textContent=lessonDoc.title;player.restore(lessonSnapshot);}}
   });
@@ -127,7 +145,10 @@ byId('importScenes').onclick=()=>{closeMenus();player.pause();byId('fileImport')
 byId('exportScene').onclick=()=>{try{exportScene(current);status('현재 장면을 내보냈습니다.');}catch(e){status(e.message);}};
 byId('exportAll').onclick=()=>exportAll().catch(e=>status(e.message));
 byId('fileImport').onchange=async e=>{try{await importFile(e.target.files[0]);}catch(err){status(`가져오기 실패: ${err.message}`);alert(`가져오기 실패: ${err.message}`);}finally{e.target.value='';}};
-byId('nextStep').onclick=()=>player.next();byId('previousStep').onclick=()=>player.previous();byId('togglePlay').onclick=()=>player.toggle();byId('restart').onclick=()=>player.restart();byId('finish').onclick=()=>player.finish();
+let lastNextAt=-Infinity;
+function nextOnce(){const now=performance.now();if(now-lastNextAt<250)return;lastNextAt=now;player.next();}
+byId('previousScene').onclick=()=>changeScene(-1);byId('nextScene').onclick=()=>changeScene(1);
+byId('nextStep').onclick=nextOnce;byId('previousStep').onclick=()=>player.previous();byId('togglePlay').onclick=()=>player.toggle();byId('restart').onclick=()=>player.restart();byId('finish').onclick=()=>player.finish();
 byId('playMode').onchange=e=>{player.mode=e.target.value;storage?.setSetting('playMode',player.mode).catch(()=>{});};
 byId('method').onchange=e=>{player.setOption('method',e.target.value);storage?.setSetting('viewOptions',player.opts).catch(()=>{});};
 document.querySelectorAll('.seg button').forEach(b=>{b.onclick=()=>{const key=b.closest('.seg').dataset.opt;player.setOption(key,b.dataset.v);syncOptions();storage?.setSetting('viewOptions',player.opts).catch(()=>{});};});
@@ -140,7 +161,7 @@ document.addEventListener('keydown',e=>{
  if(e.key==='Escape'){const menu=$('.menu[open]');if(menu){menu.open=false;menu.querySelector('summary').focus();}return;}
  if(document.querySelector('dialog[open], .menu[open]') || e.target.closest('input,textarea,select,button,summary,a,[contenteditable="true"]'))return;
  if(e.shiftKey&&e.key==='PageDown'){e.preventDefault();changeScene(1);return;}if(e.shiftKey&&e.key==='PageUp'){e.preventDefault();changeScene(-1);return;}
- if(e.key==='ArrowRight'||e.key==='PageDown'){e.preventDefault();player.next();}else if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();player.previous();}else if(e.key===' '){e.preventDefault();player.toggle();}
+ if(e.key==='ArrowRight'||e.key==='PageDown'){e.preventDefault();nextOnce();}else if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();player.previous();}else if(e.key===' '){e.preventDefault();player.toggle();}
 });
 document.addEventListener('visibilitychange',()=>{if(document.hidden)player.pause();});
 window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>player.resize(),180);});
