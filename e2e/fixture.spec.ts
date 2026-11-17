@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { openLesson, trackProblems } from "./helpers";
+import { goToStep, openLesson, trackProblems } from "./helpers";
 
 // 조표·임시표 시험(개발용 대본). NEXT_PUBLIC_DEV_LESSONS=1로 빌드했을 때만 열린다.
 test("사장조: 조표(올림표 1개)와 임시표(내림·올림·제자리)가 제대로 그려진다", async ({ page }) => {
@@ -16,7 +16,7 @@ test("사장조: 조표(올림표 1개)와 임시표(내림·올림·제자리)�
   expect(await perColumn()).toEqual([1, 1, 1, 1, 1, 1, 1, 1]);
 
   // 임시표 단계(5단계): Bb4(내림표), C#5(올림표), F5(제자리표), F#5(조표 안이라 없음)
-  await page.getByRole("button", { name: "5단계로 이동" }).click();
+  await goToStep(page, 5);
   await expect(page.locator("svg.staff g.col")).toHaveCount(4);
   expect(await perColumn()).toEqual([2, 2, 2, 1]);
   expect(problems).toEqual([]);

@@ -690,3 +690,116 @@ svg.keyboard {
     transition: none !important;
   }
 }
+
+/* ───────── 실제 화이트보드와 상단 도구 모음 ───────── */
+.player {
+  grid-template-rows: auto minmax(0, 1fr);
+  max-width: none;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--bg) 95%, white), var(--bg));
+}
+.topbar {
+  z-index: 5;
+  position: relative;
+  display: block;
+  padding: 8px clamp(12px, 2vw, 28px) 6px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 4px 18px rgba(17, 32, 27, .08);
+}
+.header-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.header-main .title { flex: 1 1 180px; }
+.header-main .tools { flex: 0 0 auto; }
+.controls {
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 6px 2px 3px;
+  scrollbar-width: thin;
+}
+.controls .btn { flex: 0 0 auto; min-height: 40px; padding: 0 13px; border-radius: 10px; font-size: 15px; }
+.controls .btn-primary { min-width: 80px; }
+.controls .stepno { flex: 0 0 auto; font-size: 15px; }
+.controls .dots { flex: 0 0 auto; order: initial; width: auto; }
+.controls .dot { width: 11px; height: 11px; margin: 13px 5px; }
+.keyboard-menu {
+  position: absolute;
+  top: calc(100% + 3px);
+  right: clamp(10px, 2vw, 28px);
+  width: min(640px, calc(100vw - 24px));
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--board);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .22);
+}
+.keyboard-menu-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 10px; }
+.keyboard-menu-head span { color: var(--fg-dim); font-size: 13px; }
+.menu-keywrap { width: 100%; height: clamp(100px, 20vh, 170px); }
+.menu-keywrap svg.keyboard { position: static; width: 100%; height: 100%; }
+.board-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  margin: clamp(10px, 2vh, 22px) clamp(12px, 2.8vw, 48px) clamp(12px, 2vh, 24px);
+  padding: clamp(7px, .9vw, 12px);
+  padding-bottom: clamp(18px, 2.1vw, 30px);
+  border: 1px solid #737b7f;
+  border-radius: 8px;
+  background: linear-gradient(100deg, #848b8f, #f7f8f8 7%, #aab0b3 14%, #f8f9f9 48%, #a8afb2 86%, #eef0f1 96%, #7c8589);
+  box-shadow: 0 8px 20px rgba(26, 35, 35, .20), inset 0 1px 2px white;
+}
+.board {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: clamp(10px, 2vh, 22px) clamp(16px, 3vw, 56px);
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, var(--fg) 18%, transparent);
+  border-radius: 2px;
+  box-shadow: inset 0 0 28px rgba(0, 0, 0, .08);
+}
+:root[data-theme="white"] .board { background: linear-gradient(135deg, #fff 0%, #fbfcfb 65%, #f3f7f7 100%); box-shadow: inset 0 0 20px rgba(68, 98, 102, .07); }
+.board .staffwrap { flex: 1 1 0; min-height: 0; }
+.board .captionbar { flex: 0 0 auto; padding: 4px 0 10px; }
+.board .caption { min-height: 0; font-size: clamp(20px, 2.6vw, 42px); }
+.marker-tray { position: absolute; left: 1%; right: 1%; bottom: -1px; width: 98%; height: clamp(20px, 2.2vw, 34px); pointer-events: none; }
+@media (max-aspect-ratio: 4/5) {
+  .board { justify-content: initial; }
+  .board .staffwrap { flex: 1 1 0; }
+  .board svg.staff { position: absolute; width: 100%; height: 100%; }
+}
+@media (max-width: 720px) {
+  .topbar { padding: 7px 10px 5px; }
+  .header-main { flex-wrap: wrap; }
+  .header-main .title { flex: 1 1 120px; }
+  .header-main .tools { width: 100%; justify-content: flex-start; overflow-x: auto; }
+  .header-main .tools .seg { margin-left: auto; }
+  .controls .btn, .controls .btn-primary { flex: 0 0 auto; }
+  .board-frame { margin: 10px 10px 14px; }
+  .board { padding: 10px 12px; }
+  .board .caption { font-size: clamp(18px, 4.8vw, 28px); }
+}
+@media (max-height: 480px) {
+  .topbar { padding-block: 4px; }
+  .header-main { flex-wrap: nowrap; }
+  .header-main .tools { width: auto; }
+  .controls { padding-block: 2px; }
+  .controls .btn { min-height: 34px; }
+  .controls .dot { margin-block: 10px; }
+  .board-frame { margin-block: 5px 8px; }
+  .board .caption { font-size: clamp(16px, 2.4vw, 24px); }
+}
+
+.step-select { display: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+@media (max-width: 720px) {
+  .controls { flex-wrap: wrap; overflow: visible; }
+  .controls .dots { display: none; }
+  .controls .stepno { display: none; }
+  .step-select { display: inline-flex; }
+  .step-select select { min-height: 40px; border: 1px solid var(--line); border-radius: 10px; padding: 0 8px; background: var(--board); color: var(--fg); font: inherit; font-weight: 700; }
+}

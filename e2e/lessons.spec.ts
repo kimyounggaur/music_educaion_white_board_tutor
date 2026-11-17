@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { lessons } from "../src/lessons";
 import { computeScene } from "../src/lib/script/scene";
-import { openLesson, trackProblems } from "./helpers";
+import { goToStep, openKeyboard, openLesson, trackProblems } from "./helpers";
 
 for (const lesson of lessons) {
   test(`${lesson.title}: 끝까지 넘기면 단계마다 자막이 계산값과 같다`, async ({ page }) => {
@@ -28,7 +28,7 @@ for (const lesson of lessons) {
 test("처음부터 다시 버튼과 단계 점으로 바로 이동", async ({ page }) => {
   const lesson = lessons.find((l) => l.id === "c-major-triads")!;
   await openLesson(page, `/lesson/${lesson.id}`);
-  await page.getByRole("button", { name: "6단계로 이동" }).click();
+  await goToStep(page, 6);
   await expect(page.locator(".stepno")).toHaveText(`6 / ${lesson.steps.length}`);
   await expect(page.locator(".caption")).toHaveText(computeScene(lesson, 5).caption);
   await page.getByRole("button", { name: "처음부터 다시" }).click();
@@ -52,6 +52,7 @@ test("?step=번호로 바로 그 단계에서 열린다(범위 밖 번호는 처
 test("오선보 열 수는 장면 계산과 같고, 강조는 칠판과 건반에 같이 나온다", async ({ page }) => {
   const lesson = lessons.find((l) => l.id === "c-major-scale")!;
   await openLesson(page, `/lesson/${lesson.id}?step=3`); // 미·파 강조
+  await openKeyboard(page);
   await expect(page.locator("svg.staff g.col")).toHaveCount(8);
   await expect(page.locator("svg.staff .halo-hot")).toHaveCount(2);
   const hotKeys = page.locator("svg.keyboard .key.is-hot");
@@ -71,11 +72,11 @@ test("화음 수업: 요소가 단계마다 하나씩 나타난다", async ({ pa
   const lesson = lessons.find((l) => l.id === "c-major-triads")!;
   await openLesson(page, `/lesson/${lesson.id}?step=1`);
   await expect(page.locator("svg.staff g.col")).toHaveCount(8);
-  await page.getByRole("button", { name: "3단계로 이동" }).click();
+  await goToStep(page, 3);
   await expect(page.locator("svg.staff g.col")).toHaveCount(9);
   await expect(page.locator("svg.staff g.col-chord")).toHaveCount(1);
   await expect(page.locator("svg.staff .lab1", { hasText: "으뜸화음" })).toBeVisible();
-  await page.getByRole("button", { name: "7단계로 이동" }).click();
+  await goToStep(page, 7);
   await expect(page.locator("svg.staff g.col-chord")).toHaveCount(3);
   await expect(page.locator("svg.staff .lab1", { hasText: "버금딸림화음" })).toBeVisible();
   await expect(page.locator("svg.staff .lab1", { hasText: "딸림화음" }).last()).toBeVisible();

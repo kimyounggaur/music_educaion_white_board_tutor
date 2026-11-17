@@ -53,3 +53,17 @@ export async function openLesson(page: Page, path: string): Promise<void> {
   await page.goto(path);
   await page.waitForSelector("svg.staff .stave");
 }
+
+/** 상단 메뉴에서 연주 및 문제 풀이용 건반을 연다. */
+export async function openKeyboard(page: Page): Promise<void> {
+  const toggle = page.getByRole("button", { name: "건반 열기" });
+  await toggle.click();
+  await page.getByRole("region", { name: "연주 건반" }).waitFor();
+}
+
+/** 좁은 화면은 단계 선택 목록, 넓은 화면은 단계 버튼을 사용한다. */
+export async function goToStep(page: Page, step: number): Promise<void> {
+  const select = page.getByLabel("수업 단계 선택");
+  if (await select.isVisible()) await select.selectOption(String(step - 1));
+  else await page.getByRole("button", { name: `${step}단계로 이동` }).click();
+}

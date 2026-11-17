@@ -16,11 +16,11 @@ export const viewport: Viewport = {
 };
 
 /** 화면이 그려지기 전에 저장된 색(칠판/화이트보드)을 적용해서 깜빡임을 막는다. */
-const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("mc-theme");document.documentElement.dataset.theme=(t==="white")?"white":"chalk"}catch(e){document.documentElement.dataset.theme="chalk"}})()`;
+const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem("mc-theme");document.documentElement.dataset.theme=(t==="chalk")?"chalk":"white"}catch(e){document.documentElement.dataset.theme="white"}})()`;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="ko" data-theme="chalk" suppressHydrationWarning>
+    <html lang="ko" data-theme="white" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>

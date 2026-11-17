@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import { expect, test, type FrameLocator, type Frame, type Page } from "@playwright/test";
 import { lessons } from "../src/lessons";
 import { computeScene } from "../src/lib/script/scene";
-import { installAudioSpy, trackProblems } from "./helpers";
+import { goToStep, installAudioSpy, openKeyboard, trackProblems } from "./helpers";
 
 /**
  * 한 파일 배포판(dist/standalone/music-chalkboard.html) 시험. 먼저 `npm run build:standalone`이 필요하다.
@@ -87,7 +87,8 @@ test.describe("파일로 직접 열기", () => {
     await installAudioSpy(page);
     await page.goto(`${FILE_URL}#names-and-solfege`);
     await page.waitForSelector("svg.staff .stave");
-    await page.getByRole("button", { name: "6단계로 이동" }).click();
+    await goToStep(page, 6);
+    await openKeyboard(page);
     await page.locator('svg.keyboard .key[data-midi="67"]').click();
     await expect(page.locator(".ask.ask-ok")).toContainText("맞아요!");
     await expect.poll(() => oscillatorStarts(page), { timeout: 3000 }).toBeGreaterThan(0);
@@ -126,7 +127,10 @@ test.describe("샌드박스 iframe + 엄격한 CSP(아티팩트 환경 흉내)",
     await expect(app.locator(".stepno")).toContainText("2 /");
 
     // 마지막 단계(해보기)로 가서 차례로 누르기
-    await app.getByRole("button", { name: /6단계로 이동/ }).click();
+    const stepSelector = app.getByLabel("수업 단계 선택");
+    if (await stepSelector.isVisible()) await stepSelector.selectOption("5");
+    else await app.getByRole("button", { name: "6단계로 이동" }).click();
+    await app.getByRole("button", { name: "건반 열기" }).click();
     for (const midi of [60, 62, 64, 65, 67, 69, 71, 72]) await app.locator(`svg.keyboard .key[data-midi="${midi}"]`).click();
     await expect(app.locator(".ask.ask-ok")).toContainText("맞아요!");
 

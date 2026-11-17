@@ -42,10 +42,10 @@ const safeScript = script.replace(/<\/(script)/gi, "<\\/$1").replace(/<!--/g, "<
 const safeCss = css.replace(/<\/(style)/gi, "<\\/$1");
 
 // 화면이 그려지기 전에 저장된 색(칠판/화이트보드)을 적용한다. src/app/layout.tsx와 같은 내용이다.
-const themeScript = `(function(){try{var t=localStorage.getItem("mc-theme");document.documentElement.dataset.theme=(t==="white")?"white":"chalk"}catch(e){document.documentElement.dataset.theme="chalk"}})()`;
+const themeScript = `(function(){try{var t=localStorage.getItem("mc-theme");document.documentElement.dataset.theme=(t==="chalk")?"chalk":"white"}catch(e){document.documentElement.dataset.theme="white"}})()`;
 
 const html = `<!DOCTYPE html>
-<html lang="ko" data-theme="chalk">
+<html lang="ko" data-theme="white">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -63,7 +63,10 @@ const html = `<!DOCTYPE html>
 `;
 
 await mkdir(outDir, { recursive: true });
-await writeFile(outFile, html, "utf8");
+// 오프라인 한 파일 배포에서도 원본 화이트보드 이미지가 표시되도록 포함한다.
+const boardImage = await readFile(path.join(root, "public", "whiteboard-reference.svg"));
+const embeddedHtml = html.replaceAll("/whiteboard-reference.svg", `data:image/svg+xml;base64,${boardImage.toString("base64")}`);
+await writeFile(outFile, embeddedHtml, "utf8");
 
 const kb = (n) => `${(n / 1024).toFixed(0)}KB`;
 console.log(`만들었어요: ${path.relative(root, outFile)}`);

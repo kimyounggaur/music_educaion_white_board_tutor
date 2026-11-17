@@ -11,7 +11,7 @@ export function ThemeToggle() {
 
   useEffect(() => {
     const current = document.documentElement.dataset.theme;
-    setTheme(current === "white" ? "white" : "chalk");
+    setTheme(current === "chalk" ? "chalk" : "white");
   }, []);
 
   const choose = (next: Theme) => {

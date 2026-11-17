@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { lessons } from "../src/lessons";
-import { audioInfo, installAudioSpy, openLesson, trackProblems } from "./helpers";
+import { audioInfo, installAudioSpy, openKeyboard, openLesson, trackProblems } from "./helpers";
 
 const scaleLesson = lessons.find((l) => l.id === "c-major-scale")!;
 
@@ -8,6 +8,7 @@ test("다음을 누르면 소리가 켜지고(running) 발진기가 시작되며
   const problems = trackProblems(page);
   await installAudioSpy(page);
   await openLesson(page, `/lesson/${scaleLesson.id}?step=2`);
+  await openKeyboard(page);
   expect((await audioInfo(page)).oscStarts).toBe(0);
 
   await page.getByRole("button", { name: "다음" }).click(); // 3단계: 미·파 재생
@@ -23,6 +24,7 @@ test("다음을 누르면 소리가 켜지고(running) 발진기가 시작되며
 test("차례로 재생: 음마다 순서대로 표시가 옮겨 간다", async ({ page }) => {
   await installAudioSpy(page);
   await openLesson(page, `/lesson/${scaleLesson.id}?step=1`);
+  await openKeyboard(page);
   await page.getByRole("button", { name: /듣기/ }).click();
   const seen = new Set<string>();
   const deadline = Date.now() + 5000;
@@ -38,6 +40,7 @@ test("차례로 재생: 음마다 순서대로 표시가 옮겨 간다", async (
 test("자동 재생을 끄면 단계를 넘겨도 소리가 나지 않고, 듣기 버튼으로는 난다", async ({ page }) => {
   await installAudioSpy(page);
   await openLesson(page, `/lesson/${scaleLesson.id}?step=2`);
+  await openKeyboard(page);
   const toggle = page.getByRole("button", { name: /자동 재생/ });
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await toggle.click();
@@ -58,6 +61,7 @@ test("자동 재생을 끄면 단계를 넘겨도 소리가 나지 않고, 듣�
 test("단계를 넘기면 앞 단계의 소리 표시가 바로 꺼진다", async ({ page }) => {
   await installAudioSpy(page);
   await openLesson(page, `/lesson/${scaleLesson.id}?step=1`);
+  await openKeyboard(page);
   await page.getByRole("button", { name: /듣기/ }).click();
   await expect(page.locator("svg.keyboard .key.is-sound").first()).toBeVisible({ timeout: 3000 });
   await page.getByRole("button", { name: "다음" }).click();
@@ -68,6 +72,7 @@ test("단계를 넘기면 앞 단계의 소리 표시가 바로 꺼진다", asyn
 test("건반을 누르면 소리가 난다", async ({ page }) => {
   await installAudioSpy(page);
   await openLesson(page, `/lesson/${scaleLesson.id}?step=1`);
+  await openKeyboard(page);
   await page.locator('svg.keyboard .key[data-midi="60"]').click();
   await expect.poll(async () => (await audioInfo(page)).oscStarts, { timeout: 3000 }).toBe(3);
   await page.locator('svg.keyboard .key[data-midi="61"]').click();

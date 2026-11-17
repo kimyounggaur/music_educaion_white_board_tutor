@@ -65,6 +65,13 @@ export function Keyboard({ fromMidi, toMidi, tonic, keyLabels, hot, sounding, fo
     onTap(k.midi);
   };
 
+  const pressKeyboard = (k: KeyDef) => (e: React.KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    e.stopPropagation();
+    onTap(k.midi);
+  };
+
   return (
     <svg
       className="keyboard"
@@ -77,7 +84,7 @@ export function Keyboard({ fromMidi, toMidi, tonic, keyLabels, hot, sounding, fo
         const { line1, line2 } = labelsFor(k, keyLabels, tonic);
         const x = k.whiteIndex * WHITE_W;
         return (
-          <g key={k.midi} className={stateClass(k)} onPointerDown={press(k)} role="button" aria-label={`${k.name} 건반`} data-midi={k.midi}>
+          <g key={k.midi} className={stateClass(k)} onPointerDown={press(k)} onKeyDown={pressKeyboard(k)} tabIndex={0} role="button" aria-label={`${k.name} 건반`} data-midi={k.midi}>
             <rect x={x + 1} y={0} width={WHITE_W - 2} height={WHITE_H - 1} rx={4} />
             {line1 ? (
               <text className="key-label" x={x + WHITE_W / 2} y={WHITE_H - (line2 ? 30 : 16)} textAnchor="middle" fontSize={line2 ? 15 : 17}>
@@ -95,7 +102,7 @@ export function Keyboard({ fromMidi, toMidi, tonic, keyLabels, hot, sounding, fo
       {blacks.map((k) => {
         const x = (k.whiteIndex + 1) * WHITE_W - BLACK_W / 2;
         return (
-          <g key={k.midi} className={stateClass(k)} onPointerDown={press(k)} role="button" aria-label={`${k.name} 건반`} data-midi={k.midi}>
+          <g key={k.midi} className={stateClass(k)} onPointerDown={press(k)} onKeyDown={pressKeyboard(k)} tabIndex={0} role="button" aria-label={`${k.name} 건반`} data-midi={k.midi}>
             <rect x={x} y={0} width={BLACK_W} height={BLACK_H} rx={3} />
           </g>
         );
