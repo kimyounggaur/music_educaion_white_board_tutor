@@ -83,6 +83,7 @@ test("건반을 누르면 소리가 난다", async ({ page }) => {
 test("수업 카드를 누르는 순간 소리가 미리 켜져서 수업 화면에서 바로 난다", async ({ page }) => {
   await installAudioSpy(page);
   await page.goto("/");
+  await page.locator("summary").filter({ hasText: "수업 선택" }).click();
   await page.getByRole("link", { name: /다장조 음계/ }).click();
   await page.waitForSelector("svg.staff .stave");
   await expect.poll(async () => (await audioInfo(page)).states).toContain("running");

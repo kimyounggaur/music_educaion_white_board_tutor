@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 import { expect, test, type FrameLocator, type Frame, type Page } from "@playwright/test";
 import { lessons } from "../src/lessons";
 import { computeScene } from "../src/lib/script/scene";
-import { goToStep, installAudioSpy, openKeyboard, trackProblems } from "./helpers";
+import { goToStep, installAudioSpy, openKeyboard, openLessonMenu, trackProblems } from "./helpers";
 
 /**
  * 한 파일 배포판(dist/standalone/music-chalkboard.html) 시험. 먼저 `npm run build:standalone`이 필요하다.
@@ -47,7 +47,8 @@ test.describe("파일로 직접 열기", () => {
     const problems = trackProblems(page);
     await page.goto(FILE_URL);
     await expect(page.getByRole("heading", { level: 1, name: "음악 칠판" })).toBeVisible();
-    await expect(page.locator("a.card")).toHaveCount(lessons.length);
+    await openLessonMenu(page);
+    await expect(page.locator("header a.home-lesson-link")).toHaveCount(lessons.length);
 
     const lesson = lessons.find((l) => l.id === "c-major-scale")!;
     await page.getByRole("link", { name: /다장조 음계/ }).click();
@@ -78,7 +79,8 @@ test.describe("파일로 직접 열기", () => {
     await page.goto(`${FILE_URL}#nothing-here`);
     await expect(page.getByText("찾는 수업이 없어요")).toBeVisible();
     await page.getByRole("link", { name: "수업 목록으로" }).click();
-    await expect(page.locator("a.card").first()).toBeVisible();
+    await openLessonMenu(page);
+    await expect(page.locator("header a.home-lesson-link").first()).toBeVisible();
     await page.getByRole("button", { name: "화이트보드" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "white");
   });
@@ -114,7 +116,8 @@ test.describe("샌드박스 iframe + 엄격한 CSP(아티팩트 환경 흉내)",
     const app = await openSandboxed(page);
 
     await expect(app.getByRole("heading", { level: 1, name: "음악 칠판" })).toBeVisible();
-    await expect(app.locator("a.card")).toHaveCount(lessons.length);
+    await app.locator("summary").filter({ hasText: "수업 선택" }).click();
+    await expect(app.locator("header a.home-lesson-link")).toHaveCount(lessons.length);
 
     await app.getByRole("link", { name: /다장조 음계/ }).click();
     await expect(app.locator("svg.staff .stave")).toBeVisible();
@@ -145,6 +148,7 @@ test.describe("샌드박스 iframe + 엄격한 CSP(아티팩트 환경 흉내)",
   test("화음 수업(오선보 열이 늘어나는 수업)도 정상이다", async ({ page }) => {
     const problems = trackProblems(page);
     const app = await openSandboxed(page);
+    await app.locator("summary").filter({ hasText: "수업 선택" }).click();
     await app.getByRole("link", { name: /주요 3화음/ }).click();
     await expect(app.locator("svg.staff .stave")).toBeVisible();
     for (let i = 0; i < 6; i++) await app.getByRole("button", { name: "다음" }).click();

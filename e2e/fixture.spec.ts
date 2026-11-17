@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { goToStep, openLesson, trackProblems } from "./helpers";
+import { goToStep, openLesson, openLessonMenu, trackProblems } from "./helpers";
 
 // 조표·임시표 시험(개발용 대본). NEXT_PUBLIC_DEV_LESSONS=1로 빌드했을 때만 열린다.
 test("사장조: 조표(올림표 1개)와 임시표(내림·올림·제자리)가 제대로 그려진다", async ({ page }) => {
@@ -24,7 +24,9 @@ test("사장조: 조표(올림표 1개)와 임시표(내림·올림·제자리)�
 
 test("개발용 대본은 수업 고르기에 없고, 주소로만 열린다", async ({ page }) => {
   await page.goto("/");
-  await expect(page.locator("a.card")).toHaveCount(4);
+  await openLessonMenu(page);
+  await expect(page.locator("header a.home-lesson-link")).toHaveCount(4);
+  await expect(page.getByRole("link", { name: /사장조 시험 칠판/ })).toHaveCount(0);
   const res = await page.goto("/dev/not-a-fixture");
   expect(res?.status()).toBe(404);
 });

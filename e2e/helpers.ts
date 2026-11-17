@@ -61,6 +61,11 @@ export async function openKeyboard(page: Page): Promise<void> {
   await page.getByRole("region", { name: "연주 건반" }).waitFor();
 }
 
+/** 첫 화면 상단에서 수업 목록을 연다. */
+export async function openLessonMenu(page: Page): Promise<void> {
+  await page.locator("summary").filter({ hasText: "수업 선택" }).click();
+}
+
 /** 좁은 화면은 단계 선택 목록, 넓은 화면은 단계 버튼을 사용한다. */
 export async function goToStep(page: Page, step: number): Promise<void> {
   const select = page.getByLabel("수업 단계 선택");

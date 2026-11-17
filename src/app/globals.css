@@ -891,3 +891,47 @@ svg.keyboard {
   .step-select { display: inline-flex; }
   .step-select select { min-height: 40px; border: 1px solid var(--line); border-radius: 10px; padding: 0 8px; background: var(--board); color: var(--fg); font: inherit; font-weight: 700; }
 }
+
+/* 첫 화면: 조작은 헤더에, 넓은 화이트보드에는 안내만 둔다. */
+.home { min-height: 100dvh; display: flex; flex-direction: column; background: linear-gradient(135deg, color-mix(in srgb, var(--bg) 90%, white), var(--bg)); }
+.home-header { position: relative; z-index: 5; display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 10px 24px; padding: 12px clamp(14px, 2.5vw, 36px); background: var(--bg); border-bottom: 1px solid var(--line); box-shadow: 0 4px 18px rgba(17, 32, 27, .08); }
+.home-brand { display: flex; align-items: center; gap: 9px; white-space: nowrap; }
+.home-brand h1 { margin: 0; font-size: clamp(21px, 2.2vw, 26px); line-height: 1.2; letter-spacing: -.04em; }
+.home-brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; color: #fff; background: #246850; font-size: 22px; font-weight: 800; }
+.home-nav { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.home-dropdown { position: relative; }
+.home-menu-button { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--board); color: var(--fg); font-size: 15px; font-weight: 750; cursor: pointer; list-style: none; }
+.home-menu-button::-webkit-details-marker { display: none; }
+.home-dropdown[open] .home-menu-button { border-color: var(--accent); }
+.home-menu-button:hover, .home-lesson-link:hover { border-color: var(--accent); }
+.home-menu-button:focus-visible, .home-lesson-link:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.home-panel { position: absolute; top: calc(100% + 8px); left: 0; width: min(410px, calc(100vw - 28px)); box-sizing: border-box; max-height: min(70dvh, 620px); overflow-y: auto; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--board); color: var(--fg); box-shadow: 0 14px 32px rgba(0, 0, 0, .18); }
+.home-help-panel { left: auto; right: 0; width: min(420px, calc(100vw - 28px)); }
+.home-panel-heading { margin: 0 0 12px; font-size: 15px; font-weight: 800; }
+.home-lesson-group + .home-lesson-group { margin-top: 14px; }
+.home-lesson-group h2 { margin: 0 0 7px; color: var(--fg-dim); font-size: 13px; }
+.home-lesson-group ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.home-lesson-link { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid transparent; border-radius: 9px; color: var(--fg); background: color-mix(in srgb, var(--board) 80%, var(--bg)); text-decoration: none; }
+.home-lesson-title { font-size: 15px; font-weight: 800; }
+.home-lesson-subtitle { color: var(--fg-dim); font-size: 13px; line-height: 1.4; }
+.home-lesson-meta { color: var(--fg-dim); font-size: 12px; line-height: 1.4; }
+.home-help-panel h2 { margin: 0 0 8px; font-size: 17px; }
+.home-help-panel p { margin: 8px 0 0; color: var(--fg-dim); font-size: 14px; line-height: 1.7; }
+.home-help-panel strong { color: var(--fg); }
+.home-board-area { flex: 1 1 auto; display: flex; min-height: 0; padding: clamp(12px, 2.5vw, 36px); }
+.home-frame { position: relative; display: flex; flex: 1 1 auto; width: 100%; min-width: 0; min-height: min(520px, 65dvh); max-width: 1440px; margin: 0 auto; padding: clamp(8px, 1vw, 13px) clamp(8px, 1vw, 13px) clamp(23px, 2.5vw, 34px); box-sizing: border-box; border: 1px solid #7f878a; border-radius: 9px; background: linear-gradient(100deg, #858d91, #f9faf9 7%, #a8b0b4 14%, #f9faf9 48%, #a6aeb2 86%, #eef0f1 96%, #7e878a); box-shadow: 0 14px 32px rgba(20, 31, 27, .23), inset 0 1px 2px white; }
+.home-surface { flex: 1 1 auto; display: grid; place-items: center; padding: 24px; border: 1px solid color-mix(in srgb, var(--fg) 17%, transparent); background: var(--board); box-shadow: inset 0 0 28px rgba(0, 0, 0, .08); }
+:root[data-theme="white"] .home-surface { background: linear-gradient(140deg, #fff 0%, #fcfdfc 60%, #f4f8f7 100%); box-shadow: inset 0 0 24px rgba(68, 98, 102, .07); }
+.home-board-hint { margin: 0; color: var(--fg-dim); text-align: center; font-size: clamp(15px, 1.7vw, 21px); line-height: 1.7; }
+.home-board-hint strong { color: var(--fg); }
+.home-marker-tray { position: absolute; left: 1%; bottom: -1px; width: 98%; height: clamp(22px, 2.5vw, 38px); pointer-events: none; }
+@media (max-width: 720px) {
+  .home-header { gap: 10px; padding: 10px 12px; }
+  .home-brand { width: 100%; }
+  .home-nav { justify-content: flex-start; gap: 6px; width: 100%; }
+  .home-dropdown { position: static; }
+  .home-menu-button { padding: 0 11px; font-size: 14px; }
+  .home-panel, .home-help-panel { top: calc(100% + 4px); left: 10px; right: 10px; width: auto; max-height: min(65dvh, 580px); }
+  .home-nav .seg-btn { padding-inline: 9px; font-size: 14px; }
+  .home-board-area { padding: 10px 10px 14px; }
+}
