@@ -935,3 +935,22 @@ svg.keyboard {
   .home-nav .seg-btn { padding-inline: 9px; font-size: 14px; }
   .home-board-area { padding: 10px 10px 14px; }
 }
+
+/* 수업 검색은 첫 화면 헤더에만 표시한다. */
+.home-search { position: relative; flex: 1 1 230px; max-width: 360px; min-width: 160px; }
+.home-search form { position: relative; }
+.home-search-icon { position: absolute; left: 13px; top: 50%; transform: translateY(-52%); color: var(--fg-dim); font-size: 25px; line-height: 1; pointer-events: none; }
+.home-search input { display: block; width: 100%; min-height: 44px; box-sizing: border-box; padding: 0 12px 0 38px; border: 1px solid var(--line); border-radius: 10px; outline: none; color: var(--fg); background: var(--board); font: inherit; font-size: 15px; }
+.home-search input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.home-search-panel { position: absolute; z-index: 8; top: calc(100% + 8px); left: 0; width: min(410px, calc(100vw - 28px)); max-height: min(65dvh, 560px); overflow-y: auto; box-sizing: border-box; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--board); box-shadow: 0 14px 32px rgba(0, 0, 0, .18); }
+.home-search-count { margin: 2px 4px 10px; color: var(--fg-dim); font-size: 13px; font-weight: 700; }
+.home-search-panel ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.home-search-result { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid transparent; border-radius: 9px; color: var(--fg); background: color-mix(in srgb, var(--board) 80%, var(--bg)); text-decoration: none; }
+.home-search-result:hover { border-color: var(--accent); }
+.home-search-result:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+.home-search-empty { margin: 0 4px 4px; color: var(--fg-dim); font-size: 13px; line-height: 1.5; }
+@media (max-width: 720px) {
+  .home-search { order: 2; flex: 1 1 100%; max-width: none; }
+  .home-nav { order: 3; }
+  .home-search-panel { width: 100%; }
+}

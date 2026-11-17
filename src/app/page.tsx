@@ -2,6 +2,7 @@ import { GRADE_ORDER, lessons } from "../lessons";
 import { GRADE_LABEL } from "../lib/script/schema";
 import { LessonLink } from "../components/LessonLink";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { LessonSearch } from "../components/LessonSearch";
 
 export default function PickerPage() {
   const groups = GRADE_ORDER.map((grade) => ({
@@ -16,6 +17,7 @@ export default function PickerPage() {
           <span aria-hidden="true" className="home-brand-mark">♪</span>
           <h1>음악 칠판</h1>
         </div>
+        <LessonSearch lessons={lessons.map((lesson) => ({ id: lesson.id, title: lesson.title, subtitle: lesson.subtitle, grade: GRADE_LABEL[lesson.grade] }))} />
         <nav className="home-nav" aria-label="첫 화면 메뉴">
           <details className="home-dropdown" name="home-menu">
             <summary className="home-menu-button">수업 선택 <span aria-hidden="true">▾</span></summary>

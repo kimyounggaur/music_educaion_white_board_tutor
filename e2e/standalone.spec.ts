@@ -43,6 +43,14 @@ async function oscillatorStarts(target: Page | Frame): Promise<number> {
 }
 
 test.describe("파일로 직접 열기", () => {
+  test("첫 화면 검색 결과로 수업을 연다", async ({ page }) => {
+    await page.goto(FILE_URL);
+    await page.getByRole("searchbox", { name: "수업 검색" }).fill("다장조 음계");
+    await page.locator(".home-search-panel").getByRole("link", { name: /다장조 음계/ }).click();
+    await expect(page).toHaveURL(/#c-major-scale/);
+    await expect(page.locator("svg.staff .stave")).toBeVisible();
+  });
+
   test("수업 고르기 → 수업 → 끝까지 → 목록으로 돌아오기", async ({ page }) => {
     const problems = trackProblems(page);
     await page.goto(FILE_URL);
