@@ -360,3 +360,44 @@ test('checks WCAG A and AA accessibility across seven whiteboard states', async 
   await expect(page.locator('#fontLicenses')).toBeVisible();
   await audit('도움말');
 });
+
+test('preserves both edits when two tabs save the same scene revision', async ({ page, context }) => {
+  await openBoard(page);
+  await saveFromQuestion(page);
+  const first = await openEditor(page, 'editScene');
+  const other = await context.newPage();
+  other.on('pageerror', error => errors.get(page).push(error.message));
+  try {
+    await other.emulateMedia({ reducedMotion: 'reduce' });
+    await other.goto('/');
+    await expect(other.locator('#sceneTitle')).toHaveText(TITLE);
+    const second = await openEditor(other, 'editScene');
+    await first.locator('#ed-title').fill('첫째 탭 변경');
+    await first.locator('#ed-question').fill('먼저 저장한 질문을 보존할까요?');
+    await second.locator('#ed-title').fill('둘째 탭 변경');
+    await second.locator('#ed-question').fill('두 번째 변경도 보관할까요?');
+    await first.getByRole('button', { name: '장면 저장', exact: true }).click();
+    await expect(first).toBeHidden();
+    await expect(page.locator('#sceneTitle')).toHaveText('첫째 탭 변경');
+
+    await second.getByRole('button', { name: '장면 저장', exact: true }).click();
+    const conflict = other.getByRole('dialog', { name: '다른 탭에서 원본 변경', exact: true });
+    await expect(conflict).toBeVisible();
+    await conflict.getByRole('button', { name: '사본 저장', exact: true }).click();
+    await expect(second).toBeHidden();
+    await expect(other.locator('#sceneTitle')).toHaveText('둘째 탭 변경 사본');
+    await other.reload();
+    await expect(other.locator('#sceneTitle')).toHaveText('둘째 탭 변경 사본');
+    await openMenu(other, 'sceneMenu');
+    await other.locator('#openScenes').click();
+    const list = other.getByRole('dialog', { name: '장면 목록' });
+    await list.getByRole('tab', { name: '내 장면' }).click();
+    await expect(list.getByText('첫째 탭 변경', { exact: true })).toHaveCount(1);
+    await expect(list.getByText('둘째 탭 변경 사본', { exact: true })).toHaveCount(1);
+    await list.getByRole('listitem').filter({ hasText: '첫째 탭 변경' }).getByRole('button', { name: '열기', exact: true }).click();
+    const saved = await openEditor(other, 'editScene');
+    await expect(saved.locator('#ed-question')).toHaveValue('먼저 저장한 질문을 보존할까요?');
+  } finally {
+    await other.close();
+  }
+});

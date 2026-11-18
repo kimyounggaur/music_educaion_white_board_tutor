@@ -270,6 +270,7 @@ async function editDoc(original, isNew = false, allowTemplateChange = false, rec
   let doc = upgradeSceneV1(original);
   let baseRevision = isNew ? null : original.revision;
   let saved = false;
+  let saveMessage = null;
   let cleanupDraft = recoveredDraft;
   let draftId = clientId + ':' + doc.id;
   if (!recoveredDraft && storage) {
@@ -326,7 +327,7 @@ async function editDoc(original, isNew = false, allowTemplateChange = false, rec
       activeLesson = null;
       await remember('activeLessonId', null);
       await openDoc(result);
-      status('장면을 저장했습니다.' + (feedback.warnings.length ? ' 세로 화면 배치 안내를 확인해 주세요.' : ''));
+      saveMessage = '장면을 저장했습니다.' + (feedback.warnings.length ? ' 세로 화면 배치 안내를 확인해 주세요.' : '');
       updateDraftCount();
     },
     onDraft: async snapshot => {
@@ -368,6 +369,7 @@ async function editDoc(original, isNew = false, allowTemplateChange = false, rec
       updateDraftCount();
       refreshNavigation();
       focusBoard();
+      if (saveMessage) status(saveMessage);
     },
   });
 }
@@ -423,11 +425,12 @@ async function openList(query = '') {
   });
 }
 
-async function updateDraftCount() {
+async function updateDraftCount({ announce = false } = {}) {
   if (!storage) return;
   try {
     const drafts = await storage.listDrafts();
     byId('recoverDraft').textContent = '초안 복구' + (drafts.length ? ' (' + drafts.length + ')' : '');
+    if (announce && drafts.length) status('복구할 초안이 ' + drafts.length + '개 있습니다. 장면 메뉴의 초안 복구에서 이어서 편집하세요.', { persistent: true });
   } catch { /* The storage status screen retains the error path. */ }
 }
 
@@ -1068,7 +1071,7 @@ async function initialize() {
     const selected = doc && !doc.deletedAt ? doc : builtins[0];
     if (activeLesson && !activeLesson.sceneIds.includes(selected.id)) activeLesson = null;
     await openDoc(selected, { rememberSelection: false });
-    updateDraftCount();
+    await updateDraftCount({ announce: true });
     const backup = await storage.getBackupStatus();
     const since = backup.lastConfirmedBackupAt || backup.firstSceneAt;
     if (since && Date.now() - Date.parse(since) > 7 * 86400000 && (!backup.reminderDismissedAt || Date.now() - Date.parse(backup.reminderDismissedAt) > 86400000)) {
