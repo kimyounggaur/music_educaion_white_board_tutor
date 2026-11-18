@@ -3,91 +3,35 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>음악 칠판 · 손 판서 시제품 (R1)</title>
+<title>음악교육 인터렉티브 화이트보드</title>
 <style>/*__STYLE__*/</style>
 </head>
 <body>
 <header class="app-header">
   <div class="brand"><span aria-hidden="true" class="brand-icon">♪</span><h1>음악 칠판</h1></div>
+  <div class="scene-indicator"><strong id="sceneTitle">장면 준비 중</strong><span id="progress" aria-live="polite"></span></div>
+  <form id="sceneSearchForm" class="header-search" role="search"><input id="sceneSearch" type="search" placeholder="장면 검색" aria-label="장면 검색"><button type="submit" aria-label="검색">검색</button></form>
   <nav class="header-nav" aria-label="판서 도구">
-    <details class="menu" name="header-menu">
-      <summary>판서 설정 <span aria-hidden="true">▾</span></summary>
-      <section class="dropdown settings" aria-label="보기 설정">
-        <div class="row"><span class="lab">장면</span>
-          <div class="seg" data-opt="scene" role="group" aria-label="장면">
-            <button type="button" data-v="chord" aria-pressed="true">① 화음 쌓기</button>
-            <button type="button" data-v="notes" aria-pressed="false">② 음 고르기</button>
-          </div></div>
-        <div class="row"><span class="lab">판</span>
-          <div class="seg" data-opt="theme" role="group" aria-label="판 종류">
-            <button type="button" data-v="chalk" aria-pressed="true">칠판</button>
-            <button type="button" data-v="white" aria-pressed="false">화이트보드</button>
-          </div></div>
-        <div class="row"><span class="lab">손</span>
-          <div class="seg" data-opt="hand" role="group" aria-label="손 보이기">
-            <button type="button" data-v="hand" aria-pressed="true">손 + 펜</button>
-            <button type="button" data-v="pen" aria-pressed="false">분필만</button>
-          </div></div>
-        <div class="row"><span class="lab">가루</span>
-          <div class="seg" data-opt="dust" role="group" aria-label="분필 가루">
-            <button type="button" data-v="on" aria-pressed="true">날림</button>
-            <button type="button" data-v="off" aria-pressed="false">없음</button>
-          </div></div>
-        <div class="row"><span class="lab">속도</span>
-          <div class="seg" data-opt="speed" role="group" aria-label="쓰는 속도">
-            <button type="button" data-v="slow" aria-pressed="false">느리게</button>
-            <button type="button" data-v="normal" aria-pressed="true">보통</button>
-            <button type="button" data-v="fast" aria-pressed="false">빠르게</button>
-          </div></div>
-        <div class="row"><span class="lab">선 방식</span>
-          <div class="seg" data-opt="method" role="group" aria-label="선 그리는 방식">
-            <button type="button" data-v="svg" aria-pressed="true">A 벡터 선</button>
-            <button type="button" data-v="canvas" aria-pressed="false">B 붓 도장</button>
-          </div></div>
-      </section>
-    </details>
-    <button id="btnRestart" class="btn" type="button">처음부터 다시 쓰기</button>
-    <button id="btnFinish" class="btn ghost" type="button">바로 완성</button>
-    <details class="menu menu-info" name="header-menu">
-      <summary>상태 · 도움말 <span aria-hidden="true">▾</span></summary>
-      <div class="dropdown info">
-        <p id="status" class="status" role="status" aria-live="polite">준비 중…</p>
-      <section id="hud" class="hud" data-verdict="none" aria-label="측정 결과">
-        <h2>프레임 측정 (이 기기)</h2>
-        <dl>
-          <div><dt>초당 프레임</dt><dd id="hudFps">–</dd></div>
-          <div><dt>95%가 이 간격 이하(ms)</dt><dd id="hudP95">–</dd></div>
-          <div><dt>가장 느린 프레임(ms)</dt><dd id="hudMax">–</dd></div>
-          <div><dt>프레임당 계산(ms)</dt><dd id="hudWork">–</dd></div>
-        </dl>
-        <p id="hudVerdict">판서가 끝나면 결과가 나옵니다.</p>
-      </section>
-
-        <section aria-labelledby="compare-heading">
-          <h2 id="compare-heading">영상과 비교할 때 볼 곳</h2>
-        <ol>
-          <li>손의 크기와 모양, 펜을 쥔 느낌</li>
-          <li>글씨가 써지는 속도와 리듬(글자 사이 쉬는 정도)</li>
-          <li>분필 가루의 양과 떨어지는 모양</li>
-          <li>선의 질감: 분필 같은지, 너무 거칠거나 매끈한지</li>
-        </ol>
-        <p class="note">'선 방식'은 A와 B를 번갈아 눌러 비교해 보세요. 어느 쪽이 더 분필 같은지가 결정할 내용입니다.</p>
-        </section>
-        <p class="note">손이 분필 또는 마커로 판서하는 느낌을 시험하는 화면입니다.</p>
-        <p class="note credit">글씨 모양: 개구체(Gaegu) 굵게의 글자 윤곽을 이용했어요. SIL Open Font License 1.1, Copyright 2018 The Gaegu Project Authors. 손 그림과 칠판·화이트보드 무늬는 직접 만든 것입니다.</p>
-      </div>
-    </details>
+    <details id="sceneMenu" class="menu" name="header-menu"><summary>장면 ▾</summary><div class="dropdown menu-actions">
+      <button id="openScenes">내 장면 열기</button><button id="newScene">새 장면</button><button id="duplicateScene">현재 장면 복제</button><button id="recoverDraft">초안 복구</button><button id="editScene">내용 편집</button>
+      <hr><button id="importScenes">파일 가져오기</button><button id="exportScene">현재 장면 내보내기</button><button id="exportAll">전체 백업</button>
+    </div></details>
+    <details class="menu" name="header-menu"><summary>판서 ▾</summary><div class="dropdown menu-actions">
+      <button id="previousStep">← 이전 단계</button><button id="nextStep">→ 다음 단계</button><button id="togglePlay">재생 · 일시정지</button><button id="previousScene">이전 장면</button><button id="nextScene">다음 장면</button><button id="restart">처음부터</button><button id="finish">이 장면 바로 완성</button>
+      <hr><label for="playMode">진행 방식</label><select id="playMode"><option value="step">단계별 진행</option><option value="auto">지정 대기 자동</option><option value="continuous">대기 없이 전체 보기</option></select>
+    </div></details>
+    <details class="menu" name="header-menu"><summary>보기 ▾</summary><section class="dropdown settings" aria-label="보기 설정">
+      <div class="row"><span class="lab">판</span><div class="seg" data-opt="theme"><button type="button" data-v="chalk">칠판</button><button type="button" data-v="white">화이트보드</button></div></div>
+      <div class="row"><span class="lab">손</span><div class="seg" data-opt="hand"><button type="button" data-v="hand">손 + 펜</button><button type="button" data-v="pen">펜만</button></div></div>
+      <div class="row"><span class="lab">가루</span><div class="seg" data-opt="dust"><button type="button" data-v="on">날림</button><button type="button" data-v="off">없음</button></div></div>
+      <div class="row"><span class="lab">속도</span><div class="seg" data-opt="speed"><button type="button" data-v="slow">느리게</button><button type="button" data-v="normal">보통</button><button type="button" data-v="fast">빠르게</button></div></div>
+    </section></details>
+    <details class="menu" name="header-menu"><summary>도움말 ▾</summary><div class="dropdown info"><p id="status" role="status" aria-live="polite">준비 중…</p><p>방향키 또는 Page Up/Down으로 단계를 이동하고, 스페이스바로 재생과 일시정지를 전환합니다.</p><p>내 장면은 이 브라우저에 저장됩니다. 다른 기기에서 사용하려면 백업 파일을 내보내고 가져오세요.</p><label for="method">선 방식</label> <select id="method"><option value="svg">벡터 선</option><option value="canvas">붓 도장</option></select><p class="note">글씨 윤곽: 개구체(Gaegu), SIL Open Font License 1.1.</p></div></details>
   </nav>
+  <button id="returnPreview" class="btn" hidden>미리보기 종료 · 편집으로 돌아가기</button>
 </header>
-<main class="board-area" aria-label="음악 판서 보드">
-  <div id="frame" class="frame" data-theme="chalk">
-    <div id="stage" class="stage">
-      <canvas id="boardTex" aria-hidden="true"></canvas>
-      <div id="ink"></div>
-      <canvas id="dust" aria-hidden="true"></canvas>
-    </div>
-  </div>
-</main>
+<main class="board-area" aria-label="음악 판서 보드"><div id="frame" class="frame" data-theme="chalk"><div id="stage" class="stage"><canvas id="boardTex" aria-hidden="true"></canvas><div id="ink"></div><canvas id="dust" aria-hidden="true"></canvas></div></div></main>
+<input id="fileImport" type="file" accept="application/json,.json" hidden>
 <script>/*__SCRIPT__*/</script>
 </body>
 </html>

@@ -48,7 +48,8 @@ export class SvgRenderer {
     const g = el("g", { class: "ink" });
     svg.appendChild(g);
     for (const item of this.scene.items) {
-      if (item.type === "glyph") this.buildGlyph(g, item);
+      if (item.type === "text") this.buildText(g, item);
+      else if (item.type === "glyph") this.buildGlyph(g, item);
       else this.buildLine(g, item);
     }
     this.host.innerHTML = "";
@@ -58,6 +59,18 @@ export class SvgRenderer {
 
   paint(ink, kind) {
     return this.chalk ? `url(#${this.patternId(ink, kind)})` : this.theme.ink[ink];
+  }
+
+  buildText(g, item) {
+    const id = `text-clip-${++maskSeq}`;
+    const clip = el("clipPath", { id, clipPathUnits: "userSpaceOnUse" });
+    const rect = el("rect", { x: item.x, y: item.baseY - item.size * 1.4, width: 0, height: item.size * 1.8 });
+    clip.appendChild(rect); this.defs.appendChild(clip);
+    const node = el("text", { x: item.x, y: item.baseY, fill: this.theme.ink[item.ink],
+      "font-family": "WhiteboardKorean, sans-serif", "font-size": item.size, "font-weight": "400", "clip-path": `url(#${id})` });
+    node.textContent = item.text;
+    g.appendChild(node);
+    this.nodes.set(item.index, { kind: "text", node, rect, item });
   }
 
   buildLine(g, item) {
@@ -144,7 +157,10 @@ export class SvgRenderer {
   setPart(part, p) {
     const n = this.nodes.get(part.item.index);
     if (!n) return;
-    if (n.kind === "line") {
+    if (n.kind === "text") {
+      const width = n.node.getComputedTextLength?.() || [...n.item.text].length * n.item.size;
+      n.rect.setAttribute("width", String((width + 2) * p));
+    } else if (n.kind === "line") {
       const q = n.paths[part.si];
       if (p > 0 && q.group.getAttribute("visibility") !== "visible") q.group.setAttribute("visibility", "visible");
       const shown = p >= 1 ? q.L : p * q.len;
@@ -171,7 +187,8 @@ export class SvgRenderer {
 
   completeAll() {
     for (const item of this.scene.items) {
-      item.strokes.forEach((_, si) => this.setPart({ item, si }, 1));
+      if (item.type === "text") this.setPart({ item, si: 0 }, 1);
+      else item.strokes.forEach((_, si) => this.setPart({ item, si }, 1));
       this.completeItem(item);
     }
   }

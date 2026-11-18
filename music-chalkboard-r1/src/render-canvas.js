@@ -53,7 +53,7 @@ export class CanvasRenderer {
     const k = this.key(part);
     let st = this.states.get(k);
     if (!st) {
-      st = { T: 0, nextD: 0, rand: rng(hashString(part.item.id) + part.si * 131) };
+      st = { T: 0, nextD: 0, rand: rng(hashString(part.item.seedId || part.item.id) + part.si * 131) };
       this.states.set(k, st);
     }
     return st;
@@ -69,6 +69,21 @@ export class CanvasRenderer {
   /** 시작부터 targetLen(px)까지 찍는다(이미 찍은 곳은 건너뜀) */
   paintTo(part, targetLen) {
     const st = this.stateOf(part);
+    if (part.item.type === "text") {
+      const item = part.item, target = Math.min(1, targetLen);
+      if (target <= st.T) return;
+      this.ctx.save();
+      this.ctx.fillStyle = this.theme.ink[item.ink];
+      this.ctx.font = `400 ${item.size}px WhiteboardKorean, sans-serif`;
+      this.ctx.textBaseline = "alphabetic";
+      const width = this.ctx.measureText(item.text).width + 2;
+      this.ctx.beginPath();
+      this.ctx.rect(item.x + width * st.T, item.baseY - item.size * 1.4, width * (target-st.T), item.size * 1.8);
+      this.ctx.clip(); this.ctx.fillText(item.text, item.x, item.baseY);
+      this.ctx.restore();
+      st.T = target;
+      return;
+    }
     const s = part.item.strokes[part.si];
     const brush = this.brushOf(part);
     const spacing = Math.max(0.5, brush * (this.chalk ? 0.14 : 0.12));
@@ -116,8 +131,9 @@ export class CanvasRenderer {
   }
 
   setPart(part, p) {
-    const s = part.item.strokes[part.si];
     if (p <= 0) return;
+    if (part.item.type === "text") { this.paintTo(part, p); return; }
+    const s = part.item.strokes[part.si];
     const target = p >= 1 ? s.len + 0.01 : p * s.len;
     this.paintTo(part, target);
   }
@@ -125,7 +141,10 @@ export class CanvasRenderer {
   completeItem() {}
 
   completeAll() {
-    for (const item of this.scene.items) item.strokes.forEach((_, si) => this.setPart({ item, si }, 1));
+    for (const item of this.scene.items) {
+      if (item.type === "text") this.setPart({item, si: 0}, 1);
+      else item.strokes.forEach((_, si) => this.setPart({ item, si }, 1));
+    }
   }
 
   destroy() {

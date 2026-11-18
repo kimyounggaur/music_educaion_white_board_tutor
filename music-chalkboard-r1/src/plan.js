@@ -37,8 +37,11 @@ export function buildPlan(scene, speedKey) {
 
   // 첫 구간: 손이 들어온다
   const firstItem = scene.items[0];
-  const firstPt = firstItem.type === "glyph" ? first(firstItem.strokes[0]) : first(firstItem.strokes[firstItem.pen ?? 0]);
-  addHop(firstPt, firstItem.ink, sp.enter, "enter");
+  if (!firstItem) return { segs, total: 0, speed: speedKey, sp };
+  if (firstItem.type !== "text") {
+    const firstPt = first(firstItem.strokes[firstItem.pen ?? 0]);
+    addHop(firstPt, firstItem.ink, sp.enter, "enter");
+  }
   penInk = firstItem.ink;
 
   const addDraw = (item, strokeIdxs, penIdx, dur) => {
@@ -51,6 +54,7 @@ export function buildPlan(scene, speedKey) {
       dur,
       ink: item.ink,
       penStroke: strokes[penIdx],
+      noHand: item.type === "text",
     });
     pen = last(strokes[penIdx]).slice();
     penInk = item.ink;
@@ -59,7 +63,11 @@ export function buildPlan(scene, speedKey) {
   let prevGlyphRun = null; // 같은 글줄에서 바로 앞 글자 항목
   for (let n = 0; n < scene.items.length; n++) {
     const item = scene.items[n];
-    if (item.type === "glyph") {
+    if (item.type === "text") {
+      // 미지원 문장은 붓 모양을 흉내 내지 않고 전체를 부드럽게 표시한다.
+      add({ type: "text", item, parts: [{item, si: 0}], dur: 0.3, ink: item.ink, noHand: true });
+      prevGlyphRun = null;
+    } else if (item.type === "glyph") {
       const budget = 1 / sp.cps;
       const isRunStart = !prevGlyphRun || !item.id.startsWith(prevGlyphRun.id.split("/")[0] + "/") || prevGlyphRun.id.split("/")[0] !== item.id.split("/")[0];
       // 글줄의 첫 글자: 거리에 따른 별도 옮김
@@ -107,9 +115,18 @@ export function buildPlan(scene, speedKey) {
   }
 
   // 마지막: 손이 나간다
-  addHop([scene.W + 120, scene.H + 170], penInk, sp.leave, "leave");
+  if (scene.items[scene.items.length - 1].type !== "text") addHop([scene.W + 120, scene.H + 170], penInk, sp.leave, "leave");
 
   return { segs, total: t, speed: speedKey, sp };
+}
+
+/** 단계마다 독립적인 시간표를 만든다. 항목 인덱스는 전체 장면의 값을 유지한다. */
+export function buildStepPlans(scene, steps, speedKey) {
+  return steps.map(step => {
+    const ids = new Set(step.groupIds);
+    const items = scene.items.filter(item => ids.has(item.groupId));
+    return { ...buildPlan({ ...scene, items }, speedKey), stepId: step.id, groupIds: step.groupIds };
+  });
 }
 
 /** 구간 안에서의 진행 정도(0~1). 긴 구간은 천천히 시작해 빨라졌다가 멈춘다 */

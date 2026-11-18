@@ -12,7 +12,9 @@ const js = execFileSync(
   { encoding: "utf8", maxBuffer: 1 << 27 },
 ).replace(/<\/script/gi, "<\\/script");
 
-const css = readFileSync("src/style.css", "utf8");
+const font = readFileSync("assets/NotoSansKR-Whiteboard.woff").toString("base64");
+const fontCss = `@font-face{font-family:WhiteboardKorean;src:url(data:font/woff;base64,${font}) format("woff");font-style:normal;font-weight:400 700;font-display:swap;}`;
+const css = fontCss + readFileSync("src/style.css", "utf8");
 const html = readFileSync("src/index.html", "utf8");
 // 치환 문자열에 "$&" 같은 특수 패턴이 들어가도 안전하도록 함수로 바꾼다
 const out = html.replace("/*__STYLE__*/", () => css).replace("/*__SCRIPT__*/", () => js);
