@@ -26,6 +26,11 @@ for (const change of [
   form=>{form.steps=[{id:'s',label:'',groupIds:[null],advance:'manual',holdMs:0}];},
   form=>{form.steps[0].advance='mystery';}, form=>{form.content.notes=[{id:'n',pitch:{}}];}
 ]) { const bad=structuredClone(draft); change(bad.formData); assert.throws(()=>makeDraftPackage(bad), /초안/); }
+for (const count of [0,2,4]) {
+  const malformed=structuredClone(draft);
+  malformed.formData.content.notes=Array.from({length:count},(_,index)=>({id:`note-${index}`,pitch:'C4'}));
+  assert.throws(()=>makeDraftPackage(malformed), /화음/, `${count}개 음으로 구성된 화음 초안은 복구 전에 거부합니다`);
+}
 const forged=structuredClone(draftBackup); forged.draft.formData.templateId='nonsense';
 assert.throws(()=>validatePackage(forged), /초안/, '불완전 초안 패키지는 가져오기 전에 거부합니다');
 const partial=structuredClone(draft); partial.formData.content.notes[0].pitch='';

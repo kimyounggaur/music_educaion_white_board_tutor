@@ -40,9 +40,15 @@ function advanceOf(ch, k) {
   return g.a * k + LETTER_EM * UPM * k;
 }
 
-export function measureText(text, size) {
+export function measureText(text, size, forceFallback = false) {
   const k = size / UPM;
-  if (!hasGlyphs(text)) return [...text].reduce((w, ch) => w + (ch === " " ? 0.32 : /[\x00-\x7f]/.test(ch) ? 0.6 : 1) * size, 0);
+  if (forceFallback || !hasGlyphs(text)) {
+    if (typeof document !== "undefined") {
+      const ctx = document.createElement("canvas").getContext("2d");
+      if (ctx) { ctx.font = `${size}px WhiteboardKorean, sans-serif`; const width = ctx.measureText(text).width; if (Number.isFinite(width) && width > 0) return width; }
+    }
+    return [...text].reduce((w, ch) => w + (ch === " " ? 0.32 : /[\x00-\x7f]/.test(ch) ? 0.6 : 1) * size, 0);
+  }
   let w = 0;
   for (const ch of text) w += advanceOf(ch, k);
   return w - LETTER_EM * size;
@@ -305,26 +311,49 @@ export function buildDocumentScene(doc, portrait) {
     if (!text) return;
     const max = x1 - x0;
     // 줄바꿈은 공백 및 문자 경계 기준. 어느 한 글자라도 미지원이면 문장 전체에 일반 글꼴을 쓴다.
+    const fallback = !hasGlyphs(text.replace(/\n/g, ""));
     const lines = [];
+    let sourceOffset = 0;
     for (const source of text.split("\n")) {
-      let line = "";
-      for (const ch of source) {
-        if (line && measureText(line + ch, size) > max) { lines.push(line.trim()); line = ""; }
-        line += ch;
+      const chars = [...source];
+      let start = 0;
+      if (!chars.length) lines.push({text:"", start:sourceOffset, end:sourceOffset});
+      while (start < chars.length) {
+        let end = start + 1;
+        while (end <= chars.length && measureText(chars.slice(start,end).join(""), size, fallback) <= max) end++;
+        if (end <= chars.length) {
+          end = Math.max(start + 1, end - 1);
+          const space = chars.slice(start,end).findLastIndex(ch => /\s/u.test(ch));
+          if (space > 0) end = start + space + 1;
+        } else end = chars.length;
+        const raw = chars.slice(start,end).join("");
+        const leading = [...(raw.match(/^\s*/u)?.[0] || "")].length;
+        const trailing = [...(raw.match(/\s*$/u)?.[0] || "")].length;
+        const visibleEnd = Math.max(start + leading, end - trailing);
+        lines.push({text:chars.slice(start+leading,visibleEnd).join(""), start:sourceOffset+start+leading, end:sourceOffset+visibleEnd});
+        start = end;
       }
-      lines.push(line.trim());
+      sourceOffset += chars.length + 1;
     }
     if (group === "question" && lines.length > 2) layoutErrors.push({field: "question", message: "질문이 칠판을 벗어나요. 문장을 줄여 주세요."});
     if (group === "caption" && lines.length > 3) layoutErrors.push({field: "caption", message: "정리 문장이 칠판을 벗어나요. 문장을 줄여 주세요."});
-    const fallback = !hasGlyphs(text.replace(/\n/g, ""));
     const result = [];
-    lines.forEach((line, i) => {
+    lines.forEach((entry, i) => {
+      const line = entry.text;
       if (!line) return;
       const args = { x, baseY: y + i * size * 1.2, size, ink, align, idPrefix: `${group}/line${i}`, seed: seed + hashString(group) + i * 101 };
       if (fallback && hasGlyphs(line)) {
-        const width = measureText(line, size), px = align === "center" ? x - width / 2 : x;
-        result.push({type: "text", id: args.idPrefix, text: line, x: px, baseY: args.baseY, size, ink});
-      } else result.push(...textRun(line, args));
+        const width = measureText(line, size, true), px = align === "center" ? x - width / 2 : x;
+        result.push({type: "text", id: args.idPrefix, text: line, x: px, baseY: args.baseY, size, ink, textStart:entry.start, textEnd:entry.end});
+      } else {
+        const items = textRun(line, args);
+        for (const item of items) {
+          const index = item.type === "glyph" ? Number(item.id.split("/").at(-1)) : 0;
+          item.textStart = entry.start + index;
+          item.textEnd = item.type === "text" ? entry.end : item.textStart + 1;
+        }
+        result.push(...items);
+      }
     });
     put(group, result);
   };
@@ -377,9 +406,6 @@ export function buildDocumentScene(doc, portrait) {
   const items=[];
   for (const step of doc.steps) {
     const ids=[...step.groupIds];
-    // 같은 단계 내에서는 오선, 음자리표, 음표, 강조 순서를 보장한다.
-    const priority=id=>id==="staff"?0:id==="clef"?1:id.startsWith("note/")?2:id.startsWith("emphasis/")?4:3;
-    ids.sort((a,b)=>priority(a)-priority(b));
     for (const id of ids) {
       if (!groups.has(id)) throw new Error(`표시할 수 없는 그룹: ${id}`);
       items.push(...groups.get(id));

@@ -1,5 +1,6 @@
 /** Browser-local scene storage and portable, versioned backups. */
 import { validateScene } from './scene-model.js';
+import { parseImportedSettings } from './import-settings.js';
 
 export const DB_NAME = 'music-whiteboard-authoring';
 export const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -79,7 +80,7 @@ function assertDraft(draft) {
   if (form.templateId === 'chord-stack') {
     if (!required(c,['preset','notes','chordName','roman','emphasis']) ||
       !['custom','C-major-I','C-major-IV','C-major-V'].includes(c.preset) ||
-      !notesOk(c.notes) || !max(c.chordName,20) || !max(c.roman,20) || typeof c.emphasis !== 'boolean')
+      (!notesOk(c.notes) || c.notes.length !== 3) || !max(c.chordName,20) || !max(c.roman,20) || typeof c.emphasis !== 'boolean')
       fail('invalid', '초안의 화음 내용이 올바르지 않습니다.');
   } else if (form.templateId === 'note-selection') {
     if (!required(c,['notes','showLabels','highlightNoteIds']) || !notesOk(c.notes) ||
@@ -204,9 +205,10 @@ export class SceneStorage {
   async deleteDraft(id) { return transaction(this.db,['drafts'],'readwrite',tx => { tx.objectStore('drafts').delete(id); }); }
   async getSetting(key) { const record = await transaction(this.db,['settings'],'readonly',tx => req(tx.objectStore('settings').get(key))); return record?.value; }
   async setSetting(key, value) { return transaction(this.db,['settings'],'readwrite',tx => { tx.objectStore('settings').put({key,value}); }); }
-  async importBundle(bundle) {
+  async importBundle(bundle, {includeSettings = false} = {}) {
     const parsed = validatePackage(bundle);
     if (parsed.kind !== 'scene-bundle') fail('invalid', '장면 백업 파일이 아닙니다.');
+    const settings = includeSettings ? parseImportedSettings(parsed.settings).settings : {};
     const importedAt = now();
     const idMap = new Map(parsed.scenes.map(scene => [scene.id, uid()]));
     const copies = parsed.scenes.map(source => ({...clone(source), id:idMap.get(source.id), origin:'user', revision:1, createdAt:importedAt, updatedAt:importedAt,
@@ -219,7 +221,7 @@ export class SceneStorage {
       const importedOrder = parsed.sceneOrder.map(id => idMap.get(id)).filter(Boolean);
       const all = [...existing,...copies];
       tx.objectStore('meta').put({key:'sceneOrder',value:reconcileSceneOrder([...orderOf(orderRecord),...importedOrder],all)});
-      // Settings are intentionally not applied automatically; the caller may offer explicit opt-in.
+      for (const [key,value] of Object.entries(settings)) tx.objectStore('settings').put({key,value});
       return copies;
     });
   }

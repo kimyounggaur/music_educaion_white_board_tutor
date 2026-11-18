@@ -18,4 +18,9 @@ player.finish();assert.equal(player.state,'completed');assert.equal(player.compl
 player.previous();assert.equal(player.completed,scene.steps.length-1);
 player.restart();assert.equal(player.state,'ready');assert.equal(player.completed,0);
 const snap=player.snapshot();player.next();player.restore(snap);assert.equal(player.completed,0);
+player.reduced=false;
+const long=createScene('text-explanation');long.content.blocks[0].text='음악을 즐겁게 배우는 한글 문장입니다. '.repeat(3);long.steps=defaultSteps(long);player.open(long);player.begin();
+const firstText=player.plans[0].segs.find(seg=>seg.type==='text');player.elapsed=firstText.t0+firstText.dur*.7;
+const before=player.location();globalThis.innerWidth=500;player.resize();const after=player.location();
+assert.equal(after.group,before.group);assert.ok(Math.abs(after.offset-before.offset)<0.01,'회전 전후 표시 위치는 같은 문자에 있어야 합니다');
 console.log('판서 시작·단계·되감기·완성·동작 줄이기 테스트 통과');

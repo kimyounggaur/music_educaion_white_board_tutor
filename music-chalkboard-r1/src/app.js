@@ -5,13 +5,14 @@ import { openSceneEditor } from './scene-editor.js';
 import { openSceneList } from './ui/scene-list.js';
 import { ScenePlayer } from './player.js';
 import { splitBackupScenes } from './backup-chunks.js';
+import { parseImportedSettings } from './import-settings.js';
 
 const $=s=>document.querySelector(s);
 const byId=id=>document.getElementById(id);
 const uuid=()=>crypto.randomUUID?.() || `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const clientId=uuid(); // 탭 복제 시에도 초안 식별자를 공유하지 않는다.
 const fields=['title','tags','question','caption','templateId','templateVersion','content','steps'];
-let storage=null, current=null, previewReturn=null, list=null, lastOrder=[], resizeTimer=0, composing=false;
+let fontAvailable=false, storage=null, current=null, previewReturn=null, list=null, lastOrder=[], resizeTimer=0, composing=false;
 const status=message=>{byId('status').textContent=message;};
 const player=new ScenePlayer({stage:byId('stage'),frame:byId('frame'),board:byId('boardTex'),ink:byId('ink'),dust:byId('dust'),onChange:({state,completed,total,message})=>{
   byId('playMode').value=player.mode;
@@ -41,7 +42,7 @@ async function openDoc(doc,{remember=true}={}) {
   catch(error){status(`장면을 열 수 없습니다: ${error.message}`);}
 }
 function download(value,name) {
-  const blob=new Blob([JSON.stringify(value,null,2)],{type:'application/json'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+  const blob=new Blob([JSON.stringify(value)],{type:'application/json'}), url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function filename(scene){return (scene.title || '장면').replace(/[\\/:*?"<>|\u0000-\u001f]/g,'_').slice(0,40);}
@@ -76,7 +77,7 @@ async function editDoc(original,isNew=false,allowTemplateChange=false,recoveredD
   let baseRevision=isNew?null:original.revision;
   if(recoveredDraft){baseRevision=recoveredDraft.baseRevision;Object.assign(doc,structuredClone(recoveredDraft.formData));}
   else if(storage) {const draft=await storage.getDraft(draftId);if(draft && confirm('저장되지 않은 초안이 있습니다. 초안을 이어서 편집할까요?')) {Object.assign(doc,structuredClone(draft.formData));baseRevision=draft.baseRevision;initialDraftLoaded=true;}}
-  openSceneEditor({scene:doc,isNew,allowTemplateChange,preserveInitialDraft:initialDraftLoaded,
+  openSceneEditor({scene:doc,isNew,allowTemplateChange,preserveInitialDraft:initialDraftLoaded,fontAvailable,
     onSave:async snapshot=>{layoutCheck(snapshot);if(!storage)throw Error('저장소를 사용할 수 없습니다. 브라우저 저장 설정을 확인해 주세요.');
       try {const result=await storage.saveScene(snapshot,{expectedRevision:baseRevision,draftId});saved=true;await openDoc(result);status('장면을 저장했습니다.');}
       catch(error){if(error.code==='conflict'){if(confirm('다른 탭에서 원본이 변경되었습니다. 현재 내용을 새 장면 사본으로 저장할까요?')){const copy=cloneDoc(snapshot);const result=await storage.saveScene(copy,{expectedRevision:null,draftId});saved=true;await openDoc(result);status('변경 내용을 새 장면 사본으로 저장했습니다.');return;} throw Error('저장 충돌이 발생했습니다. 초안을 유지하거나 파일로 내보낼 수 있습니다.');}throw error;}
@@ -132,7 +133,14 @@ async function importFile(file) {
   if(!file)return;if(!storage)throw Error('저장소를 사용할 수 없습니다.');if(file.size>5*1024*1024)throw Error('파일은 5 MiB 이하여야 합니다.');
   const text=await file.text(), pkg=validatePackage(text);
   if(pkg.kind==='draft') {const draft=recoverImportedDraft(pkg,clientId);await storage.saveDraft(draft);const doc=createScene(draft.formData.templateId);Object.assign(doc,draft.formData);await editDoc(doc,true,false,draft);status('파일의 초안을 편집기로 열었습니다.');}
-  else {if(!confirm(`${pkg.scenes.length}개 장면을 새 사본으로 가져올까요?`))return;const imported=await storage.importBundle(pkg);status(`${imported.length}개 장면을 사본으로 가져왔습니다.`);list?.refresh();}
+  else {
+    const parsedSettings=parseImportedSettings(pkg.settings);
+    if(!confirm(`${pkg.scenes.length}개 장면을 새 사본으로 가져올까요?`))return;
+    const includeSettings=parsedSettings.available && confirm('백업에 포함된 보기 설정도 적용할까요? 취소하면 장면만 가져옵니다.');
+    const imported=await storage.importBundle(pkg,{includeSettings});
+    if(includeSettings){for(const [key,value] of Object.entries(parsedSettings.settings.viewOptions||{}))player.setOption(key,value);if(parsedSettings.settings.playMode)player.mode=byId('playMode').value=parsedSettings.settings.playMode;byId('method').value=player.opts.method;syncOptions();}
+    status(`${imported.length}개 장면을 사본으로 가져왔습니다${includeSettings?' · 보기 설정 적용':''}.`);list?.refresh();
+  }
 }
 
 byId('sceneSearchForm').onsubmit=e=>{e.preventDefault();if(!previewReturn)openList(byId('sceneSearch').value);};
@@ -165,5 +173,5 @@ document.addEventListener('keydown',e=>{
 });
 document.addEventListener('visibilitychange',()=>{if(document.hidden)player.pause();});
 window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>player.resize(),180);});
-(async()=>{syncOptions();try{storage=await openSceneStorage();const savedOpts=await storage.getSetting('viewOptions');if(savedOpts && typeof savedOpts==='object') for(const [key,allowed] of Object.entries({theme:['chalk','white'],hand:['hand','pen'],dust:['on','off'],speed:['slow','normal','fast'],method:['svg','canvas']})) if(allowed.includes(savedOpts[key]))player.opts[key]=savedOpts[key];const mode=await storage.getSetting('playMode');if(['step','auto','continuous'].includes(mode))player.mode=byId('playMode').value=mode;byId('method').value=player.opts.method;syncOptions();const last=await storage.getSetting('lastSceneId');const doc=builtins.find(s=>s.id===last)||(typeof last==='string'?await storage.getScene(last):null)||builtins[0];await openDoc(doc.deletedAt?builtins[0]:doc);}
+(async()=>{syncOptions();try{if(document.fonts?.load){const loaded=await document.fonts.load('400 16px WhiteboardKorean','한글');fontAvailable=loaded.length>0;}}catch{fontAvailable=false;}try{storage=await openSceneStorage();const savedOpts=await storage.getSetting('viewOptions');if(savedOpts && typeof savedOpts==='object') for(const [key,allowed] of Object.entries({theme:['chalk','white'],hand:['hand','pen'],dust:['on','off'],speed:['slow','normal','fast'],method:['svg','canvas']})) if(allowed.includes(savedOpts[key]))player.opts[key]=savedOpts[key];const mode=await storage.getSetting('playMode');if(['step','auto','continuous'].includes(mode))player.mode=byId('playMode').value=mode;byId('method').value=player.opts.method;syncOptions();const last=await storage.getSetting('lastSceneId');const doc=builtins.find(s=>s.id===last)||(typeof last==='string'?await storage.getScene(last):null)||builtins[0];await openDoc(doc.deletedAt?builtins[0]:doc);if(!fontAvailable)status('일반 글꼴을 불러오지 못해 기기 기본 글꼴을 사용합니다.');}
 catch(e){await openDoc(builtins[0],{remember:false});status(`기본 장면을 열었습니다. 저장소를 사용할 수 없습니다: ${e.message}`);}})();

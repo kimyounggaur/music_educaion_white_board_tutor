@@ -67,7 +67,7 @@ export class SvgRenderer {
     const rect = el("rect", { x: item.x, y: item.baseY - item.size * 1.4, width: 0, height: item.size * 1.8 });
     clip.appendChild(rect); this.defs.appendChild(clip);
     const node = el("text", { x: item.x, y: item.baseY, fill: this.theme.ink[item.ink],
-      "font-family": "system-ui, sans-serif", "font-size": item.size, "font-weight": "500", "clip-path": `url(#${id})` });
+      "font-family": "WhiteboardKorean, sans-serif", "font-size": item.size, "font-weight": "400", "clip-path": `url(#${id})` });
     node.textContent = item.text;
     g.appendChild(node);
     this.nodes.set(item.index, { kind: "text", node, rect, item });

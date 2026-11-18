@@ -66,16 +66,43 @@ export function reconcileSteps(scene) {
     if (!activeSet.has(id) || seen.has(id)) return false;
     seen.add(id); return true;
   }) })).filter(s => s.groupIds.length);
+  const noteGroups = active.filter(id => id.startsWith('note/'));
+  const requirements = id => {
+    if (id === 'clef') return ['staff'];
+    if (id.startsWith('note/')) return ['staff', 'clef'];
+    if (id === 'emphasis/chord') return noteGroups;
+    if (id.startsWith('label/') || id.startsWith('emphasis/')) return [`note/${id.slice(id.indexOf('/') + 1)}`];
+    return [];
+  };
+  const locate = id => {
+    for (let i=0;i<result.length;i++) { const j=result[i].groupIds.indexOf(id); if(j>=0)return {step:i,index:j}; }
+    return null;
+  };
   const missing = active.filter(id => !seen.has(id));
   for (const id of missing) {
     if (id.startsWith('body/')) { result.push(step('본문', [id])); continue; }
+    if (id === 'question') { result.unshift(step('질문', [id])); continue; }
+    if (id === 'caption') { result.push(step('정리', [id])); continue; }
     const family = id.split('/')[0];
-    let target = result.findLast?.(s => s.groupIds.some(g => g.split('/')[0] === family));
-    if (!target && (family === 'label' || family === 'emphasis')) target = result.findLast?.(s => s.groupIds.some(g => g.startsWith(family === 'label' ? 'note/' : 'emphasis/')));
-    if (!target && id === 'question') { result.unshift(step('질문', [id])); continue; }
-    if (!target && id === 'caption') { result.push(step('정리', [id])); continue; }
-    if (!target && (id === 'staff' || id === 'clef')) { result.unshift(step('오선과 음자리표', [id])); continue; }
-    if (target) target.groupIds.push(id); else result.push(step('추가 내용', [id]));
+    let targetIndex = -1;
+    for (let i=result.length-1;i>=0;i--) if (result[i].groupIds.some(g => g.split('/')[0] === family)) {targetIndex=i;break;}
+    if (targetIndex < 0 && (family === 'label' || family === 'emphasis')) {
+      for (let i=result.length-1;i>=0;i--) if (result[i].groupIds.some(g => g.startsWith('note/'))) {targetIndex=i;break;}
+    }
+    const before = requirements(id).map(locate).filter(Boolean);
+    const after = active.filter(g => requirements(g).includes(id)).map(locate).filter(Boolean);
+    const lower = before.length ? Math.max(...before.map(p=>p.step)) : 0;
+    const upper = after.length ? Math.min(...after.map(p=>p.step)) : Math.max(result.length-1,0);
+    if (!result.length) { result.push(step(id==='staff'||id==='clef'?'오선과 음자리표':'추가 내용', [id])); continue; }
+    if (targetIndex < 0) targetIndex = id==='staff'||id==='clef' ? 0 : result.length-1;
+    // Place newly introduced groups between their existing prerequisites and dependents.
+    // Do not reorder pre-existing groups or silently repair an already invalid arrangement.
+    if (lower <= upper) targetIndex=Math.max(lower,Math.min(targetIndex,upper));
+    const groups=result[targetIndex].groupIds;
+    const minIndex=before.filter(p=>p.step===targetIndex).reduce((n,p)=>Math.max(n,p.index+1),0);
+    const maxIndex=after.filter(p=>p.step===targetIndex).reduce((n,p)=>Math.min(n,p.index),groups.length);
+    const insertion=minIndex<=maxIndex ? maxIndex : groups.length;
+    groups.splice(insertion,0,id);
   }
   return result;
 }
@@ -163,10 +190,14 @@ export function validateScene(scene) {
     if (!['manual','auto'].includes(s.advance)) fail(`steps.${i}.advance`, '단계 진행 방식이 올바르지 않습니다.');
     if (!Number.isInteger(s.holdMs) || s.holdMs < 0 || s.holdMs > 10000 || s.holdMs % 100) fail(`steps.${i}.holdMs`, '대기 시간은 0~10000ms의 100ms 단위여야 합니다.');
     if (!Array.isArray(s.groupIds) || !s.groupIds.length || s.groupIds.length > 100) { fail(`steps.${i}.groupIds`, '단계에 표시할 내용을 넣어 주세요.'); return; }
-    for (const g of s.groupIds) { if (!groupSet.has(g)) fail(`steps.${i}.groupIds`, `없는 내용: ${String(g)}`); if (membership.has(g)) fail(`steps.${i}.groupIds`, `내용이 중복 배정되었습니다: ${String(g)}`); membership.set(g, i); }
+    s.groupIds.forEach((g, index) => { if (!groupSet.has(g)) fail(`steps.${i}.groupIds`, `없는 내용: ${String(g)}`); if (membership.has(g)) fail(`steps.${i}.groupIds`, `내용이 중복 배정되었습니다: ${String(g)}`); else membership.set(g, {step:i, index}); });
   });
   for (const g of groups) if (!membership.has(g)) fail('steps', `단계에 배정되지 않은 내용: ${g}`);
-  const prereq = (dependent, required) => { if (membership.has(dependent) && membership.has(required) && membership.get(dependent) < membership.get(required)) fail('steps', `${dependent}보다 ${required}을 먼저 표시해 주세요.`); };
+  const prereq = (dependent, required) => {
+    const after = membership.get(dependent), before = membership.get(required);
+    if (after && before && (after.step < before.step || (after.step === before.step && after.index < before.index)))
+      fail(`steps.${after.step}.groupIds`, `${dependent}보다 ${required}을 먼저 표시해 주세요.`);
+  };
   prereq('clef','staff');
   for (const g of groups) if (g.startsWith('note/')) { prereq(g, 'staff'); prereq(g, 'clef'); }
   for (const g of groups) if (g.startsWith('label/') || (g.startsWith('emphasis/') && g !== 'emphasis/chord')) prereq(g, `note/${g.slice(g.indexOf('/') + 1)}`);

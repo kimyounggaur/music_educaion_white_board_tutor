@@ -74,7 +74,7 @@ export class CanvasRenderer {
       if (target <= st.T) return;
       this.ctx.save();
       this.ctx.fillStyle = this.theme.ink[item.ink];
-      this.ctx.font = `500 ${item.size}px system-ui, sans-serif`;
+      this.ctx.font = `400 ${item.size}px WhiteboardKorean, sans-serif`;
       this.ctx.textBaseline = "alphabetic";
       const width = this.ctx.measureText(item.text).width + 2;
       this.ctx.beginPath();

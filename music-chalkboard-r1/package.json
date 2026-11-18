@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node tests/plan.test.mjs && node tests/scene-model.test.mjs && node tests/document-render.test.mjs && node tests/storage.test.mjs && node tests/storage-integration.test.mjs && node tests/player.test.mjs && node tests/app-integration.test.mjs && node tests/scene-list.test.mjs && node tests/backup-chunks.test.mjs && node tests/editor-drafts.test.mjs",
+    "test": "node tests/plan.test.mjs && node tests/scene-model.test.mjs && node tests/document-render.test.mjs && node tests/storage.test.mjs && node tests/storage-integration.test.mjs && node tests/player.test.mjs && node tests/app-integration.test.mjs && node tests/scene-list.test.mjs && node tests/backup-chunks.test.mjs && node tests/editor-drafts.test.mjs && node tests/font-layout.test.mjs && node tests/import-settings.test.mjs",
     "glyphs": "node tools/build-glyphs.mjs <글꼴 woff 파일> tools/glyph-text.txt src/glyph-data.json"
   },
   "devDependencies": {

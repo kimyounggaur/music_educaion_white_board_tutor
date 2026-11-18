@@ -141,17 +141,29 @@ export class ScenePlayer {
     if(i<0)return null;
     const at=plan.segs[i], next=plan.segs.slice(i).find(seg=>seg.item);
     if(!next)return null;
-    return {id:next.item.seedId,group:next.item.groupId,part:next.parts?.[0]?.si ?? 0,
-      ratio:at===next?clamp((this.elapsed-next.t0)/next.dur,0,1):0};
+    const ratio=at===next?clamp((this.elapsed-next.t0)/next.dur,0,1):0;
+    const item=next.item;
+    const offset=typeof item.textStart==='number' ? item.textStart+(item.type==='text' && at===next ? (item.textEnd-item.textStart)*segProgress(next,this.elapsed) : 0) : null;
+    return {id:item.seedId,group:item.groupId,part:next.parts?.[0]?.si??0,ratio,offset};
   }
   seekLocation(location) {
     if(!location)return;
     const segs=this.plans[this.completed]?.segs||[];
-    let match=segs.find(s=>s.item?.seedId===location.id && (s.parts?.[0]?.si??0)===location.part);
-    // Changed line wrapping: fall back to the start of the same semantic group,
-    // never a later group or an unshown answer.
+    let match;
+    if(location.offset!==null && location.offset!==undefined) {
+      const candidates=segs.filter(s=>s.item?.groupId===location.group && typeof s.item.textStart==='number');
+      match=candidates.find(s=>s.item.textStart<=location.offset && location.offset<s.item.textEnd && (s.parts?.[0]?.si??0)===location.part)
+        || candidates.find(s=>s.item.textStart>=location.offset);
+      if(match && match.item.type==='text') {
+        const wanted=clamp((location.offset-match.item.textStart)/(match.item.textEnd-match.item.textStart||1),0,1);
+        let lo=0,hi=1;
+        for(let i=0;i<24;i++){const mid=(lo+hi)/2;if(segProgress(match,match.t0+mid*match.dur)<wanted)lo=mid;else hi=mid;}
+        this.elapsed=match.t0+((lo+hi)/2)*match.dur;this.drawAt(this.elapsed,0,true);return;
+      }
+    }
+    if(!match)match=segs.find(s=>s.item?.seedId===location.id && (s.parts?.[0]?.si??0)===location.part);
     if(!match)match=segs.find(s=>s.item?.groupId===location.group);
-    if(match){this.elapsed=match.t0+(match.item.seedId===location.id?location.ratio*match.dur:0);this.drawAt(this.elapsed,0,true);}
+    if(match){this.elapsed=match.t0+location.ratio*match.dur;this.drawAt(this.elapsed,0,true);}
   }
   setOption(key,value) {
     if(this.opts[key]===value)return;

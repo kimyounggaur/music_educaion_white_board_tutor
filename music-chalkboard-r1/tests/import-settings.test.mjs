@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import {parseImportedSettings, applyImportedSettings} from '../src/import-settings.js';
+
+const backup={viewOptions:{theme:'white',hand:'pen',dust:'off',speed:'slow',method:'canvas'},playMode:'auto'};
+const normalized=parseImportedSettings(backup);
+assert.equal(normalized.available,true);
+assert.deepEqual(normalized.settings,backup);
+assert.notEqual(normalized.settings.viewOptions,backup.viewOptions);
+assert.deepEqual(parseImportedSettings(null),{available:false,settings:{}});
+assert.deepEqual(parseImportedSettings({viewOptions:null}),{available:false,settings:{}});
+for(const value of [{playMode:'other'},{viewOptions:{theme:'dark'}},{viewOptions:{theme:'chalk',password:'secret'}},{unknown:true},[],{viewOptions:'x'},{viewOptions:JSON.parse('{"__proto__":{"polluted":true}}')}]) assert.throws(()=>parseImportedSettings(value));
+let writes=0;
+assert.equal((await applyImportedSettings(backup,{selected:false,save:()=>{writes++;}})).applied,false);
+assert.equal(writes,0);
+let saved;
+assert.equal((await applyImportedSettings(backup,{selected:true,save:async settings=>{saved=settings;writes++;}})).applied,true);
+assert.deepEqual(saved,backup);assert.equal(writes,1);
+await assert.rejects(applyImportedSettings(backup,{selected:true,save:async()=>{throw Error('storage failed');}}),/storage failed/);
+await assert.rejects(applyImportedSettings({playMode:'bad'},{selected:true,save:async()=>{writes++;}}));
+assert.equal(writes,1);
+console.log('가져온 보기 설정 유효성·선택 적용·저장 오류 테스트 통과');
