@@ -1,81 +1,35 @@
-# 저장소 안내
+# 음악 칠판 튜터
 
-기존 수업 앱의 코드는 `main`에서 제거되었습니다. 손 판서 R1 시제품은 [`music-chalkboard-r1/`](music-chalkboard-r1/)에 있습니다. 아래 설명은 기존 수업 앱의 기록입니다.
+교사가 장면과 수업을 만들어 손 판서·음향·건반 활동으로 설명하는 브라우저 음악 수업 도구입니다.
 
----
+[운영 앱](https://music-education-whiteboard-tutor.vercel.app/)
 
-# 음악 칠판 (가칭)
+앱 소스는 `music-chalkboard-r1/`에 있습니다. 상단 헤더에서 장면 만들기·수업 관리·판서·보기를 열고 본문에는 칠판을 크게 표시합니다. 높은음자리표, 조표와 임시표, 3·4음 화음, 음이름·계이름, 단계별 판서를 지원합니다. 기본 수업은 AI 초안·교사 검토 전 상태를 표시합니다.
 
-교사가 교실 화면(전자칠판·TV·프로젝터)에 띄워 쓰는 음악 이론 수업용 칠판입니다. 수업 대본(데이터)을 앱이 오선보·건반·소리로 바꿔 한 단계씩 보여 줍니다. 대상은 초등 5학년부터 중학교 3학년까지입니다.
+## 개발
 
-1단계(시범판)에는 AI 호출, 로그인, 저장이 없습니다. 수업 대본은 앱 안의 파일입니다.
+Node.js 24.x를 사용합니다.
 
-## 상태 (2026-11-17)
+```sh
+cd music-chalkboard-r1
+npm ci
+npm test
+npm run build
+npm run dev
+```
 
-- 수업 4편이 처음부터 끝까지 동작하고 자동 시험을 통과했습니다.
-- 아직 안 한 것: 실제 휴대폰·교실 기기 확인, 실제 교실 시연, 교사 3명 이상의 의견.
-- 정식 공개 주소는 아직 없습니다(Vercel 팀 이용 제한, 개발 지시서 14장).
+`npm run build`는 외부 파일 요청 없이 실행되는 `dist/index.html`을 만듭니다. 글꼴과 라이선스도 HTML에 포함합니다. 실행 중 외부 통신은 CSP로 제한합니다.
 
-## 문서
+`npm run test:e2e`는 Playwright Chromium·WebKit의 실제 브라우저 회귀 시험입니다. 최초에는 `npx playwright install --with-deps chromium webkit`으로 해당 실행 환경의 브라우저를 준비합니다. 이미 제공된 Chromium은 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`로 선택할 수 있습니다. `BASE_URL`을 지정하면 준비된 미리보기를 시험합니다.
 
-기준 문서는 `docs/`에 있습니다. 내용이 다르면 기획서가 우선입니다.
+## 자료 저장과 호환
 
-- `docs/음악칠판튜터_기획서.md`: 무엇을 왜 만드는가
-- `docs/음악칠판튜터_개발지시서.md`: 어떻게 만드는가(대본 형식, 검산 규칙, 화면·소리 명세, 구현 결과)
-- `docs/음악칠판_개념시안.html`: 처음 구상 때 만든 화면 시안(브라우저로 열기)
-- `CLAUDE.md`: Claude Code로 이어서 개발할 때 지킬 규칙 요약
+내 장면·초안·수업은 같은 브라우저와 주소의 IndexedDB에 저장합니다. 새 버전은 기존 v1 장면·초안·백업을 읽습니다. v2 자료를 저장한 뒤에는 같은 DB와 자료 버전을 읽는 빌드로 복구해야 합니다.
 
-## 수업 4편
+전체 백업은 장면 메뉴에서 파일로 보관하며 초안은 별도로 내보냅니다. 분할 백업은 같은 세트의 파일을 함께 가져올 수 있습니다. 짧은 공유 링크는 내용 전체를 담고 있어 링크를 받은 사람이 열 수 있습니다. 긴 수업은 수업 파일로 옮깁니다.
 
-| 수업 | 학교급 | 단계 |
-| --- | --- | --- |
-| 음이름과 계이름 | 공통 기초 | 7 |
-| 다장조 음계 | 공통 기초 | 6 |
-| 다장조 주요 3화음 | 공통 기초 | 9 |
-| 딸림7화음과 마침꼴 | 중학교 | 7 |
+## 설계와 자료
 
-모두 "AI 초안 · 교사 검토 전" 표시가 붙어 있습니다.
-
-## 실행
-
-필요한 것: Node.js 22 이상, 브라우저 시험에는 설치된 Google Chrome.
-
-| 명령 | 하는 일 |
-| --- | --- |
-| `npm install` | 필요한 도구 설치 |
-| `npm run dev` | 개발 서버 실행(http://localhost:3000) |
-| `npm test` | 단위 시험(Vitest) |
-| `npm run validate` | 모든 수업 대본 검산 |
-| `npm run typecheck` | 형식 검사(TypeScript) |
-| `npm run build` | 수업 검산 후 제품용 빌드 |
-| `npm run e2e` | 브라우저 시험(제품용 빌드 후 Playwright, 몇 분 걸림) |
-| `npm run build:standalone` | 한 파일 시범판 만들기 |
-
-## 한 파일 시범판
-
-`npm run build:standalone`을 실행하면 `dist/standalone/music-chalkboard.html` 한 파일이 생깁니다(약 1.5MB). 인터넷 없이도 컴퓨터에서 파일을 더블클릭하면 브라우저에서 열립니다. Claude 링크(아티팩트)로 올려 휴대폰에서 열어 보는 데도 이 파일을 씁니다.
-
-- 주소는 `#수업id` 방식입니다(예: `…/music-chalkboard.html#c-major-triads`). 단계 주소(`?step=3`)는 지원하지 않습니다.
-- 같은 컴포넌트와 수업 대본을 쓰므로 수업을 고치면 다시 빌드하면 됩니다.
-
-## 수업 추가하기
-
-1. `src/lessons/`에 대본 파일(.ts)을 만듭니다. 형식은 개발 지시서 5장입니다. 기존 수업 파일을 복사해 고치는 것이 가장 쉽습니다.
-2. `src/lessons/index.ts`의 `lessons` 목록에 넣습니다.
-3. `npm run validate`로 검산합니다. 음 이름·화음 같은 이론 사실은 대본에 직접 적지 않고 앱이 계산하며, 틀리면 검산기가 오류로 알려 줍니다.
-4. `npm test`로 전체 시험을 돌립니다.
-
-## 지원 브라우저
-
-Chrome 111 이상, Safari 16.4 이상(Tailwind CSS v4 기준)입니다. 더 오래된 전자칠판 내장 브라우저는 화면이 깨질 수 있어 실기기 확인이 필요합니다.
-
-## 폴더
-
-- `src/app`: 화면(수업 고르기, 수업, 개발용 시험 칠판)
-- `src/components`: 칠판 화면 부품(오선보, 건반, 수업 플레이어)
-- `src/lib/theory`: 음 이름, 음계, 화음, 한국어 이름(이론 계산)
-- `src/lib/script`: 수업 대본 형식, 검산기, 자막 채우기, 장면 계산
-- `src/lib/audio`, `src/lib/player`: 소리 엔진, 진행 상태와 해보기 판정
-- `src/lessons`: 수업 대본
-- `standalone`, `scripts`: 한 파일 시범판과 검산 스크립트
-- `tests`, `e2e`: 단위 시험, 브라우저 시험
+- [리팩토링 설계서](docs/Music_Whiteboard_Refactoring_Design_v1.0_20261118.md)
+- [앱 개발과 검수](music-chalkboard-r1/README.md)
+- 이전 수업 앱의 이식 원본은 [6804a36](https://github.com/kimyounggaur/music_educaion_white_board_tutor/tree/6804a36)에서 확인할 수 있습니다.

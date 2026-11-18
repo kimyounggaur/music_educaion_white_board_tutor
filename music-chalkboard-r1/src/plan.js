@@ -1,6 +1,7 @@
 // 판서 계획: 장면의 항목 순서대로 "손이 들어옴 → (옮김 → 쓰기)… → 나감" 구간을 시간표로 만든다.
 // 모든 구간은 이어져 있고 겹치지 않는다. 시간은 초 단위, 계획 시작을 0으로 한다.
 import { clamp, easeInOut, pointAt } from "./util.js";
+import { parsePitch } from "./theory/pitch.js";
 
 /** 속도별 시간표(설계서 6.7절 초기값). hop은 옮기는 시간의 배율 */
 export const SPEEDS = {
@@ -54,7 +55,6 @@ export function buildPlan(scene, speedKey) {
       dur,
       ink: item.ink,
       penStroke: strokes[penIdx],
-      noHand: item.type === "text",
     });
     pen = last(strokes[penIdx]).slice();
     penInk = item.ink;
@@ -64,8 +64,8 @@ export function buildPlan(scene, speedKey) {
   for (let n = 0; n < scene.items.length; n++) {
     const item = scene.items[n];
     if (item.type === "text") {
-      // 미지원 문장은 붓 모양을 흉내 내지 않고 전체를 부드럽게 표시한다.
-      add({ type: "text", item, parts: [{item, si: 0}], dur: 0.3, ink: item.ink, noHand: true });
+      // 일반 글꼴 대체 문자는 획 대신 글자 자체를 표시한다.
+      add({ type: "text", item, parts: [{item, si: 0}], dur: item.textDuration ?? 0.3, ink: item.ink, noHand: true });
       prevGlyphRun = null;
     } else if (item.type === "glyph") {
       const budget = 1 / sp.cps;
@@ -122,11 +122,85 @@ export function buildPlan(scene, speedKey) {
 
 /** 단계마다 독립적인 시간표를 만든다. 항목 인덱스는 전체 장면의 값을 유지한다. */
 export function buildStepPlans(scene, steps, speedKey) {
+  const notes = collectNoteHeads(scene);
+  const shown = new Set();
   return steps.map(step => {
     const ids = new Set(step.groupIds);
     const items = scene.items.filter(item => ids.has(item.groupId));
-    return { ...buildPlan({ ...scene, items }, speedKey), stepId: step.id, groupIds: step.groupIds };
+    const plan = buildPlan({ ...scene, items }, speedKey);
+    const endings = new Map();
+    for (const segment of plan.segs) {
+      if (segment.item?.role === "head") endings.set(segment.item.index, segment.t1);
+    }
+    const newlyVisible = notes.filter(note => endings.has(note.index));
+    for (const note of newlyVisible) shown.add(note.noteId);
+    const columns = new Map();
+    for (const note of newlyVisible) {
+      if (!columns.has(note.columnId)) columns.set(note.columnId, []);
+      columns.get(note.columnId).push(note);
+    }
+    const events = [];
+    const add = (at, soundingNotes, suffix) => {
+      if (!soundingNotes.length) return;
+      events.push({
+        eventId: `${step.id}/${suffix}`,
+        stepId: step.id,
+        noteIds: soundingNotes.map(note => note.noteId),
+        midis: soundingNotes.map(note => note.midi),
+        at,
+      });
+    };
+
+    if (step.cue?.type === "listen") {
+      const audible = notes.filter(note => shown.has(note.noteId));
+      const listens = step.cue.targets.map(target => notesForTarget(audible, target)).filter(group => group.length);
+      return { ...plan, stepId:step.id, groupIds:step.groupIds, events, listens };
+    }
+    if (step.cue?.type !== "practice") {
+      for (const [columnId, current] of columns) {
+        const whole = notes.filter(note => note.columnId === columnId);
+        if (whole.length > 1 && whole.every(note => shown.has(note.noteId))) {
+          add(Math.max(...current.map(note => endings.get(note.index))), whole, `chord/${columnId}`);
+        } else {
+          for (const note of current) add(endings.get(note.index), [note], `note/${note.noteId}`);
+        }
+      }
+    }
+    events.sort((a,b) => a.at - b.at);
+    return { ...plan, stepId:step.id, groupIds:step.groupIds, events, listens:[] };
   });
+}
+
+/** The same logical note head backs visible controls, hit testing and sound. */
+export function collectNoteHeads(scene) {
+  return scene.items.filter(item => item.role === "head").flatMap(item => {
+    const midi = item.midi ?? parsePitch(item.noteName || "")?.midi;
+    if (!Number.isInteger(midi) || midi < 0 || midi > 127) return [];
+    const noteId = item.noteId ?? item.groupId?.slice("note/".length);
+    if (!noteId) return [];
+    const pts = item.strokes[0].pts;
+    const center = {
+      x:item.cx ?? (Math.min(...pts.map(pt => pt[0])) + Math.max(...pts.map(pt => pt[0]))) / 2,
+      y:item.cy ?? (Math.min(...pts.map(pt => pt[1])) + Math.max(...pts.map(pt => pt[1]))) / 2,
+    };
+    return [{
+      index:item.index,
+      noteId,
+      pitch:item.noteName,
+      midi,
+      columnId:item.columnId ?? (scene.templateId === "chord-stack" ? "legacy-chord" : noteId),
+      center,
+      width:item.noteWidth ?? scene.u * 1.5,
+      height:item.noteHeight ?? scene.u,
+    }];
+  }).sort((a,b) => (scene.noteColumns?.indexOf(a.columnId) ?? 0) - (scene.noteColumns?.indexOf(b.columnId) ?? 0)
+    || a.center.x - b.center.x || a.index - b.index);
+}
+
+function notesForTarget(notes, target) {
+  if (target.columnId) return notes.filter(note => note.columnId === target.columnId);
+  if (target.noteId) return notes.filter(note => note.noteId === target.noteId);
+  return [];
 }
 
 /** 구간 안에서의 진행 정도(0~1). 긴 구간은 천천히 시작해 빨라졌다가 멈춘다 */

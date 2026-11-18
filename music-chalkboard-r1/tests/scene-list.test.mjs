@@ -7,6 +7,12 @@ const scene=(id,title,origin,extra={})=>({id,title,origin,deletedAt:null,templat
 const builtins=[scene('builtin:1','으뜸화음','builtin',{tags:['기초']})];
 const scenes=[scene('user:1','으뜸화음 실습','user',{question:'도 미 솔'}),scene('user:2','숨김 으뜸화음','user',{deletedAt:'2026-11-17T00:00:00.000Z'})];
 assert.deepEqual(searchScenes([...builtins,...scenes], '으뜸화음').map(x=>x.id),['builtin:1','user:1','user:2']);
+const joined = scene('joined', '구성음 찾기', 'user', {question:'도·미·솔'});
+assert.equal(searchScenes([joined], '도미솔').length, 1);
+const chromatic = [scene('sharp','C# 화음','user'), scene('flat','Bb 화음','user'), scene('dominant','V7 화음','user')];
+assert.deepEqual(searchScenes(chromatic, 'C#').map(item=>item.id), ['sharp']);
+assert.deepEqual(searchScenes(chromatic, 'Bb').map(item=>item.id), ['flat']);
+assert.deepEqual(searchScenes(chromatic, 'V7').map(item=>item.id), ['dominant']);
 let opened;
 const list=openSceneList({query:'으뜸화음',data:async()=>({builtins,scenes,order:['user:1']}),onOpen:(s,ids)=>{opened={s,ids};}});
 await list.refresh();

@@ -3,9 +3,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
 
-// 이 폴더에서 npm install 한 도구를 먼저 쓰고, 없으면 작업 환경의 것을 쓴다
-const require = createRequire(fs.existsSync(path.resolve("node_modules/opentype.js")) ? path.resolve("package.json") : "/home/claude/spike-tools/package.json");
+const require = createRequire(import.meta.url);
 const opentype = require("opentype.js");
 const TraceSkeleton = require("skeleton-tracing-js");
 
@@ -352,7 +352,9 @@ function analyze(ch) {
   const adv = glyph.advanceWidth ?? UPM;
   const p = glyph.getPath(0, 0, UPM);
   const contours = flatten(p.commands);
-  const out = { ch, adv, d: p.toPathData(0), strokes: [], cover: 1, stem: 0, missing: glyph.index === 0 };
+  const { x1, y1, x2, y2 } = p.getBoundingBox();
+  const bbox = [Math.floor(x1), Math.floor(y1), Math.ceil(x2), Math.ceil(y2)];
+  const out = { ch, adv, bbox, strokes: [], cover: 1, stem: 0 };
   if (contours.length) {
     const { grid, w, h } = rasterize(contours, adv);
     const dist = distanceTransform(grid, w, h);
@@ -381,23 +383,30 @@ function analyze(ch) {
   return out;
 }
 
-const all = new Set(LINES.join("").replace(/\s/g, ""));
-const results = [...all].map(analyze);
-
-const glyphs = {};
-for (const r of results) {
-  glyphs[r.ch] = {
-    a: Math.round(r.adv),
-    d: r.d,
-    s: r.strokes.map((pl) => pl.flat()),
-    w: Math.round(r.stem),
-    c: Math.round(r.cover * 1000) / 10,
-  };
+const cmap = font.tables.cmap.glyphIndexMap;
+const allowed = cp => (cp >= 0xac00 && cp <= 0xd7a3)
+  || (cp >= 0x21 && cp <= 0x7e)
+  || [0xb7, 0x2013, 0x2014, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2026, 0x266d, 0x266e, 0x266f].includes(cp);
+const codePoints = new Set(Object.keys(cmap).map(Number).filter(cp => cmap[cp] && allowed(cp)));
+const requested = [...new Set(LINES.join("").normalize("NFC").replace(/\s/g, ""))];
+for (const ch of requested) {
+  if (cmap[ch.codePointAt(0)]) codePoints.add(ch.codePointAt(0));
 }
-const out = { upm: UPM, asc: ASC, desc: DESC, font: path.basename(fontPath), glyphs };
+const results = [...codePoints].sort((a, b) => a - b).map(cp => analyze(String.fromCodePoint(cp)));
+const glyphs = Object.create(null);
+for (const r of results) {
+  // Each tuple holds advance, bounds, centerline strokes and typical thickness.
+  if (r.strokes.length) glyphs[r.ch] = [Math.round(r.adv), r.bbox, r.strokes.map(points => points.flat()), Math.round(r.stem)];
+}
+const fontSha256 = createHash("sha256").update(buf).digest("hex");
+const out = { upm: UPM, asc: ASC, desc: DESC, font: path.basename(fontPath), fontSha256, glyphs };
 fs.mkdirSync(path.dirname(outJson), { recursive: true });
-fs.writeFileSync(outJson, JSON.stringify(out));
-const low = results.filter((r) => r.cover < 0.97).map((r) => `${r.ch}:${(r.cover * 100).toFixed(0)}`);
-console.log(`글자 ${results.length}개 → ${outJson} (${(fs.statSync(outJson).size / 1024).toFixed(1)}KB)`);
-console.log("없는 글자:", results.filter((r) => r.missing).map((r) => r.ch).join("") || "없음");
-console.log("덮임률 97% 미만:", low.join(" ") || "없음");
+fs.writeFileSync(outJson, JSON.stringify(out) + "\n");
+const low = results.filter(r => r.cover < 0.97).map(r => `${r.ch}:${(r.cover * 100).toFixed(1)}%`);
+const hangul = results.filter(r => /^[가-힣]$/u.test(r.ch));
+const average = hangul.reduce((sum, r) => sum + r.cover, 0) / hangul.length;
+console.log(`글자 ${Object.keys(glyphs).length}개 (한글 ${hangul.length}개) → ${outJson} (${(fs.statSync(outJson).size / 1024).toFixed(1)}KB)`);
+console.log(`한글 평균 덮임률 ${(average * 100).toFixed(2)}%, 덮임률 97% 미만: ${low.join(" ") || "없음"}`);
+const missing = requested.filter(ch => !glyphs[ch]);
+if (missing.length) console.log("대체 글꼴로 표시:", missing.join(" "));
+if (hangul.length !== 2350 || average < 0.99) process.exitCode = 1;

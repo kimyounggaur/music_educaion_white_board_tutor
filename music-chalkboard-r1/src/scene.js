@@ -1,148 +1,83 @@
 // 장면 만들기: 칠판에 쓸 것을 "순서대로 쓰는 길"의 목록으로 바꾼다.
 // 글씨는 글꼴 윤곽 + 뽑아 둔 획, 악보는 직접 계산한 길이다.
-import GLYPHS from "./glyph-data.json" with { type: "json" };
-import { bounds, catmullRom, chaikin, ellipseArc, hashString, resample, rng, wobble, cumulative } from "./util.js";
-import { CLEF_BOX, clefUnits, diatonicIndex, ledgerIndices, noteY } from "./symbols.js";
-
-const UPM = GLYPHS.upm;
-const SPACE_EM = 0.3;
-const LETTER_EM = 0.035;
-
-/** 이 앱의 획 자료로 문장 전체를 표현할 수 있는지 검사한다. */
-export function hasGlyphs(text) {
-  return [...text].every((ch) => ch === " " || !!GLYPHS.glyphs[ch]);
-}
+import { bounds, chaikin, ellipseArc, hashString, resample, rng, wobble, cumulative } from "./util.js";
+import { CLEF_BOX, accidentalUnits, clefUnits, diatonicIndex, ledgerIndices, noteY, signatureSymbols } from "./symbols.js";
+import { activeGroups, columnGroupIds, getColumns } from "./scene-model.js";
+import { formatPitch, parsePitch } from "./theory/pitch.js";
+import { accidentalEvents, DEFAULT_KEY, isSupportedKey, keySignatureAccidentals } from "./theory/scale.js";
+import { describeChord, formatNoteLabel, keyNameKo } from "./theory/korean.js";
+import { fallbackFamily, fitVisibleRows, glyphUnits, layoutParagraph } from "./text-layout.js";
+export { hasGlyphs, measureText, setTextFontAvailability } from "./text-layout.js";
 
 /** 화면 방향별 크기와 자리(논리 단위) */
 export function metricsFor(portrait) {
   return portrait
-    ? { portrait: true, W: 480, H: 640, u: 16, x0: 24, x1: 456, qBase: 66, qMax: 34, yb: 268, capBase: 566, capMax: 36 }
-    : { portrait: false, W: 1000, H: 620, u: 22, x0: 64, x1: 936, qBase: 86, qMax: 46, yb: 298, capBase: 552, capMax: 48 };
+    ? { portrait: true, W: 480, H: 640, u: 16, x0: 24, x1: 456 }
+    : { portrait: false, W: 1000, H: 620, u: 22, x0: 64, x1: 936 };
 }
 
-export const SCENES = {
-  chord: {
-    label: "① 화음 쌓기(버금딸림화음)",
-    caption: "함께 울리면 버금딸림화음이 돼요.",
-  },
-  notes: {
-    label: "② 음 고르기(도·미·솔)",
-    caption: "첫째, 셋째, 다섯째 음을 골라요.",
-  },
-};
-export const QUESTION = "Q. 주요 3화음은 어떻게 만들어요?";
-
-// ───────── 글자 ─────────
-function advanceOf(ch, k) {
-  if (ch === " ") return SPACE_EM * UPM * k;
-  const g = GLYPHS.glyphs[ch];
-  if (!g) throw new Error("글씨 자료에 없는 글자: " + ch);
-  return g.a * k + LETTER_EM * UPM * k;
-}
-
-export function measureText(text, size, forceFallback = false) {
-  const k = size / UPM;
-  if (forceFallback || !hasGlyphs(text)) {
-    if (typeof document !== "undefined") {
-      const ctx = document.createElement("canvas").getContext("2d");
-      if (ctx) { ctx.font = `${size}px WhiteboardKorean, sans-serif`; const width = ctx.measureText(text).width; if (Number.isFinite(width) && width > 0) return width; }
-    }
-    return [...text].reduce((w, ch) => w + (ch === " " ? 0.32 : /[\x00-\x7f]/.test(ch) ? 0.6 : 1) * size, 0);
-  }
-  let w = 0;
-  for (const ch of text) w += advanceOf(ch, k);
-  return w - LETTER_EM * size;
-}
-
-/** 폭에 맞는 글자 크기(최대 크기 이하) */
-export function fitSize(text, maxWidth, maxSize) {
-  const w1 = measureText(text, 1);
-  return Math.min(maxSize, maxWidth / w1);
-}
-
-/** 글자 하나의 옮겨 그리기: 글꼴 좌표 → 화면 좌표(작은 기울기·크기·높이 흔들림 포함) */
-function placeGlyph(ch, x, baseY, size, seed, ink, id) {
-  const g = GLYPHS.glyphs[ch];
+function placeGlyph(token, x, baseY, seed, ink, id, textRunId) {
+  const { ch, glyph, fontSize } = token;
+  const [advance, inkBox, centerlines, thickness] = glyph;
   const rand = rng(seed);
-  const k = (size / UPM) * (0.97 + rand() * 0.06);
-  const rot = ((rand() - 0.5) * 3.4 * Math.PI) / 180; // ±1.7도
-  const dy = (rand() - 0.5) * 0.06 * size;
-  const cr = Math.cos(rot);
-  const sr = Math.sin(rot);
-  const cx = g.a / 2; // 글자 가운데를 기준으로 돌린다
-  const tf = (px, py) => {
-    const ax = px - cx;
-    const ay = py;
-    return [x + (g.a / 2) * k + (ax * cr - ay * sr) * k, baseY + dy + (ax * sr + ay * cr) * k];
-  };
-  // 윤곽 경로의 숫자 쌍을 모두 변환(절대 좌표 명령만 쓴다)
-  const nums = g.d.match(/-?\d+(?:\.\d+)?|[A-Za-z]/g) || [];
-  let out = "";
-  let buf = [];
-  const flush = () => {
-    for (let i = 0; i + 1 < buf.length; i += 2) {
-      const [tx, ty] = tf(buf[i], buf[i + 1]);
-      out += (i ? " " : "") + Math.round(tx * 10) / 10 + " " + Math.round(ty * 10) / 10;
-    }
-    buf = [];
-  };
-  for (const t of nums) {
-    if (/[A-Za-z]/.test(t)) {
-      flush();
-      out += t;
-    } else buf.push(Number(t));
+  const scale = fontSize / glyphUnits;
+  const rot = (rand() - 0.5) * 3.4 * Math.PI / 180;
+  const dy = (rand() - 0.5) * 0.045 * fontSize;
+  const cos = Math.cos(rot);
+  const sin = Math.sin(rot);
+  const center = advance * scale / 2;
+  const tx = x + center - cos * center;
+  const ty = baseY + dy - sin * center;
+  const transform = (px, py) => [tx + (px * cos - py * sin) * scale, ty + (px * sin + py * cos) * scale];
+  const isDot = ch === "." || ch === "·";
+  const [left, top, right, bottom] = inkBox;
+  let paths = centerlines;
+  if (isDot) {
+    const x = (left + right) / 2;
+    const y = (top + bottom) / 2;
+    paths = [[x, y, x, y]];
+  } else if (ch === ",") {
+    const x = left + (right - left) * .63;
+    const y = top + (bottom - top) * .26;
+    paths = [[x, y, x, y], [x, y, x, (y + bottom) / 2, left + (right - left) * .22, bottom]];
   }
-  flush();
-
-  const strokes = g.s.map((flat) => {
-    const pts = [];
-    for (let i = 0; i + 1 < flat.length; i += 2) pts.push(tf(flat[i], flat[i + 1]));
-    const sm = pts.length > 2 ? resample(chaikin(pts, 1), 1.4) : pts;
-    const cum = cumulative(sm);
-    return { pts: sm, cum, len: cum[cum.length - 1] || 0 };
+  const strokes = paths.map(flat => {
+    const points = [];
+    for (let i = 0; i + 1 < flat.length; i += 2) points.push(transform(flat[i], flat[i + 1]));
+    const pts = points.length > 2 ? resample(chaikin(points, 1), 1.4) : points;
+    const cum = cumulative(pts);
+    return { pts, cum, len: cum[cum.length - 1] ?? 0 };
   });
-  const stemPx = Math.max(g.w, 90) * k;
-  const all = strokes.flatMap((s) => s.pts);
-  const bb = bounds(all.length ? all : [[x, baseY]]);
-  const pad = stemPx * 1.4;
+  const stemPx = Math.max(thickness, 90) * scale;
+  const revealW = isDot ? Math.hypot(right - left, bottom - top) * scale : stemPx * 1.9;
+  const box = bounds([transform(left, top), transform(left, bottom), transform(right, top), transform(right, bottom)]);
+  const pad = Math.max(2, revealW / 2);
   return {
-    type: "glyph",
-    id,
-    ch,
-    ink,
-    outlineD: out,
-    strokes,
-    stemPx,
-    revealW: stemPx * 1.9,
-    brushW: stemPx * 1.3,
-    bbox: { x0: bb.x0 - pad, y0: bb.y0 - pad, x1: bb.x1 + pad, y1: bb.y1 + pad },
+    type: "glyph", id, ink, ch, textRunId, size: fontSize,
+    textStart: token.offset ?? undefined, textEnd: token.end ?? undefined,
+    fontTransform: [cos, sin, -sin, cos, tx, ty], strokes, stemPx, revealW,
+    bbox: { x0: box.x0 - pad, y0: box.y0 - pad, x1: box.x1 + pad, y1: box.y1 + pad },
   };
 }
 
-/** 글줄 하나를 글자 항목들로. align: left | center (기준 x) */
-function textRun(text, { x, baseY, size, align = "left", ink = "main", idPrefix, seed }) {
-  const total = measureText(text, size);
-  // 글자가 하나라도 없으면 글줄 전체를 일반 글꼴로 표시한다.
-  if (!hasGlyphs(text)) {
-    const start = align === "center" ? x - total / 2 : x;
-    return [{ type: "text", id: idPrefix, text, x: start, baseY, size, ink }];
-  }
-  let cx = align === "center" ? x - total / 2 : x;
-  const k = size / UPM;
-  const items = [];
-  let i = 0;
-  for (const ch of text) {
-    const adv = advanceOf(ch, k);
-    if (ch !== " ") {
-      items.push(placeGlyph(ch, cx, baseY, size, seed + i * 977, ink, `${idPrefix}/${i}`));
-      items[items.length - 1].gapBefore = false;
-    } else if (items.length) {
-      items[items.length - 1].spaceAfter = true;
+function lineItems(row, { x, baseY, size, align = "left", ink = "main", idPrefix, seed }) {
+  let position = align === "center" ? x - row.width / 2 : x;
+  const output = [];
+  for (const [i, token] of row.tokens.entries()) {
+    if (token.space) {
+      if (output.length) output.at(-1).spaceAfter = true;
+    } else {
+      const id = `${idPrefix}/${token.offset ?? `prefix-${i}`}`;
+      if (token.glyph) output.push(placeGlyph(token, position, baseY, seed + (token.offset ?? i) * 977, ink, id, idPrefix));
+      else output.push({
+        type: "text", id, text: token.ch, x: position, baseY, size, ink, width: token.inkWidth,
+        fontFamily: fallbackFamily(), textStart: token.offset ?? undefined, textEnd: token.end ?? undefined,
+        textDuration: Math.min(.85, .16 + .025 * ((token.end ?? 1) - (token.offset ?? 0))),
+      });
     }
-    cx += adv;
-    i++;
+    position += token.width;
   }
-  return items;
+  return output;
 }
 
 // ───────── 악보 부품 ─────────
@@ -172,247 +107,255 @@ function circleStroke(cx, cy, rx, ry, u, seed) {
   return { pts: w, cum, len: cum[cum.length - 1], width: Math.max(2.6, 0.2 * u) };
 }
 
-/** 장면 만들기. 항목 순서가 곧 쓰는 순서다. */
-export function buildScene(sceneKey, portrait) {
-  const m = metricsFor(portrait);
-  const { u, x0, x1, yb } = m;
-  const seed0 = hashString("r1:" + sceneKey);
-  const items = [];
-  const push = (...a) => items.push(...a);
-
-  // 1) 질문 줄
-  const qSize = fitSize(QUESTION, x1 - x0, m.qMax);
-  push(...textRun(QUESTION, { x: x0, baseY: m.qBase, size: qSize, ink: "main", idPrefix: "q", seed: seed0 + 11 }));
-
-  // 2) 오선(다섯 줄을 한 번에)
-  const staffStrokes = [0, 1, 2, 3, 4].map((i) =>
-    lineStroke([[x0, yb - i * u], [x1, yb - i * u]], Math.max(2, 0.11 * u), seed0 + 101 + i, 0.03 * u),
-  );
-  push({ type: "line", role: "staff", id: "staff", ink: "main", strokes: staffStrokes, pen: 2, parallel: true });
-
-  // 3) 음자리표
-  const gY = yb - u; // G줄(아래에서 둘째 줄)
-  const clefLeft = x0 + 0.9 * u;
-  const clefPts = clefUnits().map(([cx, cy]) => [clefLeft + cx * u, gY + cy * u]);
-  const clefW = wobble(resample(clefPts, 2.5), 0.03 * u, seed0 + 202, 90);
-  const clefCum = cumulative(clefW);
-  push({
-    type: "line",
-    role: "clef",
-    id: "clef",
-    ink: "main",
-    strokes: [{ pts: clefW, cum: clefCum, len: clefCum[clefCum.length - 1], width: Math.max(3, 0.19 * u) }],
-    pen: 0,
-  });
-
-  // 4) 설명 줄(아래쪽)
-  const caption = SCENES[sceneKey].caption;
-  const cSize = fitSize(caption, x1 - x0, m.capMax);
-  push(...textRun(caption, { x: (x0 + x1) / 2, baseY: m.capBase, size: cSize, align: "center", ink: "main", idPrefix: "cap", seed: seed0 + 303 }));
-
-  const labelSize = 1.5 * u;
-  const labelBase = yb + 4.7 * u;
-  const headRx = 0.86 * u;
-
-  const addNote = (name, cx, idPrefix) => {
-    const idx = diatonicIndex(name);
-    const cy = noteY(name, yb, u);
-    for (const li of ledgerIndices(idx)) {
-      const ly = yb - (li - 30) * (u / 2);
-      const half = headRx + 0.4 * u;
-      push({
-        type: "line",
-        role: "ledger",
-        id: `${idPrefix}/ledger${li}`,
-        ink: "main",
-        strokes: [lineStroke([[cx - half, ly], [cx + half, ly]], Math.max(2, 0.13 * u), seed0 + li * 13, 0.05 * u)],
-        pen: 0,
-      });
-    }
-    push({
-      type: "line",
-      role: "head",
-      id: `${idPrefix}/head`,
-      ink: "main",
-      strokes: [headStroke(cx, cy, u, seed0 + idx * 31)],
-      pen: 0,
-      noteName: name,
-    });
-    return { cx, cy };
+function textFields(doc, portrait, metrics) {
+  const maxWidth = metrics.x1 - metrics.x0 - 4;
+  const fields = [];
+  const add = (field, text, start, maxRows, size, minSize, prefix = "", group = field, ink = "main") => {
+    if (typeof text !== "string" || !text.trim()) return null;
+    const layout = layoutParagraph(text, { size, minSize, maxRows, maxWidth, prefix });
+    const result = { field, group, text, layout, start, maxRows, maxWidth, ink };
+    fields.push(result);
+    return result;
   };
+  add("question", doc.question, portrait ? 58 : 72, 2, portrait ? 29 : 36, 22, "Q. ");
+  add("caption", doc.caption, portrait ? 532 : 525, 3, portrait ? 25 : 28, 20);
+  if (doc.templateId === "text-explanation") {
+    const blocks = Array.isArray(doc.content?.blocks) ? doc.content.blocks : [];
+    const first = portrait ? 173 : 169;
+    const bottom = portrait ? 470 : 466;
+    let size = portrait ? 25 : 31;
+    while (size > 20) {
+      const height = blocks.reduce((sum, block) => {
+        if (typeof block.text !== "string" || !block.text.trim()) return sum;
+        const preview = layoutParagraph(block.text, { size, maxWidth });
+        return sum + size * 1.27 * preview.rows.length + 12;
+      }, 0);
+      if (height - 12 <= bottom - first) break;
+      size--;
+    }
+    let baseline = first;
+    for (const [index, block] of blocks.entries()) {
+      const maxRows = Math.max(0, Math.floor((bottom - baseline - size * .32) / (size * 1.27)) + 1);
+      const item = add(`content.blocks.${index}.text`, block.text, baseline, maxRows, size, size, "", `body/${block.id}`, block.ink);
+      if (item) baseline += item.layout.rows.length * item.layout.lineHeight + 12;
+    }
+  }
+  return fields;
+}
 
-  if (sceneKey === "chord") {
-    const cx = x0 + (x1 - x0) * 0.62;
-    const names = ["F4", "A4", "C5"];
-    const spots = names.map((n, i) => addNote(n, cx, `ch/${i}`));
-    // 화음 이름과 로마 숫자
-    push(...textRun("버금딸림화음", { x: cx, baseY: labelBase, size: labelSize, align: "center", ink: "main", idPrefix: "name", seed: seed0 + 404 }));
-    push(...textRun("IV", { x: cx, baseY: labelBase + 1.7 * u, size: labelSize * 0.8, align: "center", ink: "dim", idPrefix: "roman", seed: seed0 + 505 }));
-    // 화음 전체를 감싸는 동그라미
-    const cyMid = (spots[0].cy + spots[2].cy) / 2;
-    const ry = (spots[0].cy - spots[2].cy) / 2 + 1.05 * u;
-    push({
-      type: "line",
-      role: "circle",
-      id: "circle/chord",
-      ink: "accent",
-      strokes: [circleStroke(cx, cyMid, 1.45 * u, ry, u, seed0 + 606)],
-      pen: 0,
+function mapNotation(doc, portrait, metrics) {
+  if (doc.templateId === "text-explanation") return null;
+  const key = isSupportedKey(doc.content?.key) ? doc.content.key : DEFAULT_KEY;
+  const signature = signatureSymbols(keySignatureAccidentals(key.tonic, key.mode));
+  const columns = getColumns(doc).filter(col => col.notes?.length).map(col => ({
+    ...col, notes: col.notes.filter(note => parsePitch(note.pitch)),
+  })).filter(col => col.notes.length);
+  const events = accidentalEvents(columns, key);
+  const groups = columns.map(column => {
+    const lanes = [];
+    const notes = column.notes.map((note, index) => {
+      const pitch = parsePitch(note.pitch);
+      const offset = index > 0 && diatonicIndex(note.pitch) - diatonicIndex(column.notes[index - 1].pitch) === 1;
+      const symbol = events.get(note.id)?.accidental;
+      let lane = null;
+      if (symbol) {
+        const position = diatonicIndex(note.pitch);
+        lane = lanes.findIndex(positions => positions.every(other => Math.abs(other - position) >= 5));
+        if (lane === -1) { lane = lanes.length; lanes.push([]); }
+        lanes[lane].push(position);
+      }
+      return { ...note, pitch, offset, symbol, lane };
     });
-  } else {
-    const names = ["C4", "D4", "E4", "F4", "G4"];
-    const labels = ["도", "레", "미", "파", "솔"];
-    const xs0 = x0 + 7 * u;
-    const xs1 = x1 - 2.6 * u;
-    const spots = names.map((n, i) => {
-      const cx = xs0 + ((xs1 - xs0) * i) / (names.length - 1);
-      const s = addNote(n, cx, `n/${i}`);
-      push(...textRun(labels[i], { x: cx, baseY: labelBase, size: labelSize, align: "center", ink: "main", idPrefix: `lab/${i}`, seed: seed0 + 700 + i }));
-      return s;
-    });
-    // 첫째·셋째·다섯째 음에 동그라미
-    [0, 2, 4].forEach((i, j) => {
-      const s = spots[i];
-      push({
-        type: "line",
-        role: "circle",
-        id: `circle/${i}`,
-        ink: "accent",
-        strokes: [circleStroke(s.cx, s.cy, 1.45 * u, 1.05 * u, u, seed0 + 800 + j)],
-        pen: 0,
-      });
-    });
+    const labelRoom = column.kind === "chord" && column.labelMode !== "none" ? 2.8 : 0;
+    return { column, notes, labelRoom, minimum: (column.kind === "chord" ? 3.5 : 2.6) + lanes.length * 1.1 + labelRoom };
+  });
+  const reserved = 4.2 + signature.length * 1.12;
+  const needed = reserved + groups.reduce((total, group) => total + group.minimum, 0);
+  const u = Math.min(metrics.u, (metrics.x1 - metrics.x0) / needed);
+  const offset = metrics.x0 + reserved * u;
+  const extra = (metrics.x1 - offset) - groups.reduce((total, group) => total + group.minimum * u, 0);
+  let left = offset;
+  for (const group of groups) {
+    const laneCount = Math.max(0, ...group.notes.map(note => (note.lane ?? -1) + 1));
+    const width = group.minimum * u + extra / Math.max(groups.length, 1);
+    const center = left + (width + (laneCount * .88 - group.labelRoom) * u) / 2;
+    group.cx = groups.length === 1 ? Math.max(center, metrics.x0 + (metrics.x1 - metrics.x0) * .55) : center;
+    group.labelX = left + width - group.labelRoom * u * .48;
+    group.maxLabelWidth = width - 3;
+    left += width;
+  }
+  return { key, signature, groups, u, overflow: u < (portrait ? 12 : 15) };
+}
+
+function prepareLayout(doc, portrait) {
+  const metrics = metricsFor(portrait);
+  const fields = textFields(doc, portrait, metrics);
+  const notation = mapNotation(doc, portrait, metrics);
+  const issues = fields.filter(field => field.layout.overflow).map(field => ({
+    field: field.field,
+    message: `${field.field === "question" ? "질문" : field.field === "caption" ? "정리 문장" : "본문"}이 칠판 영역을 넘어요. 문장을 줄이거나 장면을 나눠 주세요.`,
+  }));
+  if (notation?.overflow) issues.push({
+    field: "content.columns", message: "이 화면에서 음표 사이가 좁아요. 여러 장면으로 열을 나누면 더 크게 표시됩니다.",
+  });
+  return { metrics, fields, notation, issues };
+}
+
+export function checkDocumentLayout(doc) {
+  const landscape = prepareLayout(doc, false);
+  const portrait = prepareLayout(doc, true);
+  const errors = landscape.issues;
+  const warnings = portrait.issues.filter(issue => !errors.some(error => error.field === issue.field))
+    .map(issue => ({ ...issue, message: `세로 화면: ${issue.message}` }));
+  const counts = {};
+  for (const [orientation, layout] of [["landscape", landscape], ["portrait", portrait]]) {
+    for (const field of layout.fields) {
+      (counts[field.field] ??= {})[orientation] = field.layout.rows.length;
+    }
+  }
+  return { errors, warnings, counts, portraitOverflow: warnings.length > 0 };
+}
+
+function accidentalItem(symbol, x, y, u, seed, id, role = "accidental") {
+  const strokes = accidentalUnits(symbol).map((path, index) =>
+    lineStroke(path.map(([px, py]) => [x + px * u, y + py * u]), Math.max(1.7, u * 0.14), seed + index, u * 0.015));
+  return { type: "line", role, id, ink: "main", strokes, pen: 0, symbol, cx: x, cy: y };
+}
+
+function drawNotation(doc, portrait, metrics, notation, put, seed) {
+  const { key, signature, groups, u } = notation;
+  const { x0, x1 } = metrics;
+  const yb = portrait ? 321 : 315;
+  const staff = [0, 1, 2, 3, 4].map(i => lineStroke([[x0, yb - i * u], [x1, yb - i * u]], Math.max(2, .11 * u), seed + 101 + i, .03 * u));
+  put("staff", [{ type: "line", role: "staff", id: "staff", ink: "main", strokes: staff, pen: 2, parallel: true }], "다섯 줄 오선");
+  const clefLeft = x0 + .55 * u;
+  const clefPts = clefUnits().map(([x, y]) => [clefLeft + x * u, yb - u + y * u]);
+  put("clef", [{ type: "line", role: "clef", id: "clef", ink: "main", strokes: [lineStroke(clefPts, Math.max(2.5, .19 * u), seed + 202, .03 * u)], pen: 0 }], "높은음자리표");
+
+  if (signature.length) {
+    const items = signature.map(({ symbol, pitch }, index) => accidentalItem(symbol, x0 + (3.6 + index * 1.12) * u, noteY(pitch, yb, u), u, seed + index * 31, `key/${index}`, "key-signature"));
+    put("key-signature", items, `${keyNameKo(key.tonic, key.mode)} 조표 ${signature.map(({ symbol, pitch }) => pitch[0] + symbol).join(" · ")}`);
   }
 
-  // 나중에 쓸 수 있게 항목마다 일련번호를 매긴다
-  items.forEach((it, i) => (it.index = i));
-  return { key: sceneKey, ...m, items, clefBox: CLEF_BOX };
+  const labelAt = (group, text, x, y, size, width, ink = "main", roman = false) => {
+    if (!text) return put(group, []);
+    const layout = layoutParagraph(text, { size, minSize: 14, maxWidth: width, maxRows: 1, letterSpacing: roman ? -.045 : .02 });
+    const rows = fitVisibleRows(layout, 1, width);
+    put(group, rows.flatMap((row, index) => lineItems(row, {
+      x, baseY: y, size: layout.size, ink, align: "center", idPrefix: `line${index}`, seed: seed + hashString(group),
+    })), text);
+  };
+  const circle = (group, x, y, rx, ry, label) => put(group, [{
+    type: "line", role: "circle", id: "circle", ink: "accent",
+    strokes: [circleStroke(x, y, rx, ry, u, seed + 606)], pen: 0,
+  }], label);
+  let previous;
+  for (const { column, notes, cx, maxLabelWidth, labelRoom, labelX } of groups) {
+    const spots = [];
+    let lastSideLabelY = Infinity;
+    for (const [index, note] of notes.entries()) {
+      const x = cx + (note.offset ? .8 * u : 0);
+      const noteName = formatPitch(note.pitch);
+      const y = noteY(noteName, yb, u);
+      const id = `note/${note.id}`;
+      const ledger = ledgerIndices(diatonicIndex(noteName));
+      const elements = ledger.map(li => {
+        const ly = yb - (li - 30) * u / 2;
+        return { type: "line", role: "ledger", id: `ledger${li}`, ink: "main",
+          strokes: [lineStroke([[x - 1.26 * u, ly], [x + 1.26 * u, ly]], Math.max(2, .13 * u), seed + li * 13, .035 * u)], pen: 0 };
+      });
+      if (note.symbol) elements.push(accidentalItem(note.symbol, cx - (1.5 + note.lane * 1.06) * u, y, u * .84, seed + index * 23, "accidental"));
+      elements.push({
+        type: "line", role: "head", id: "head", ink: "main",
+        strokes: [headStroke(x, y, u, seed + note.pitch.midi * 31 + index)],
+        pen: 0, noteId: note.id, noteName, midi: note.pitch.midi, columnId: column.id, cx: x, cy: y, noteWidth: u * 1.92, noteHeight: u * 1.3,
+      });
+      put(id, elements, `${formatNoteLabel(noteName, "fixed-do", key)} ${noteName}`);
+      spots.push({ x, y });
+      if (column.labelMode !== "none") {
+        const size = Math.max(20, u * 1.32);
+        const text = formatNoteLabel(noteName, column.labelMode, key);
+        const blockX = column.kind === "chord" ? labelX : x;
+        const blockY = column.kind === "chord" ? Math.min(lastSideLabelY - (labelRoom ? u * 1.22 : 0), y + .34 * u) : yb + 2.48 * u;
+        lastSideLabelY = blockY;
+        if (column.labelMode === "both" && column.kind !== "chord" && text.includes(" · ")) {
+          const [first, second] = text.split(" · ");
+          const combined = [first, second].flatMap((row, rowIndex) => {
+            const layout = layoutParagraph(row, { size, minSize: 14, maxWidth: maxLabelWidth, maxRows: 1 });
+            return fitVisibleRows(layout, 1, maxLabelWidth).flatMap(r => lineItems(r, {
+              x: blockX, baseY: blockY + rowIndex * size * 1.12, size: layout.size, align: "center",
+              idPrefix: `label-line${rowIndex}`, seed: seed + hashString(note.id) + rowIndex,
+            }));
+          });
+          put(`label/${note.id}`, combined, text);
+        } else labelAt(`label/${note.id}`, text, blockX, blockY, size, column.kind === "chord" ? Math.max(18, labelRoom * u - 2) : maxLabelWidth);
+      }
+      if (column.highlightNoteIds?.includes(note.id)) circle(`emphasis/${note.id}`, x, y, 1.32 * u, .98 * u, `${formatNoteLabel(noteName, "fixed-do", key)} 강조`);
+    }
+    if (column.kind === "chord") {
+      const ids = columnGroupIds(column);
+      const chord = doc.schemaVersion === 1
+        ? { name: column.legacyName ?? "", roman: column.legacyRoman ?? "" }
+        : describeChord(column, key);
+      const lowest = Math.max(...spots.map(spot => spot.y));
+      const highest = Math.min(...spots.map(spot => spot.y));
+      const baseline = Math.max(yb + 2.85 * u, lowest + 2.65 * u);
+      if (column.showName) labelAt(ids.name, [chord.name, column.teacherMemo && `메모 ${column.teacherMemo}`].filter(Boolean).join(" · "), cx, baseline, Math.max(23, u * 1.42), maxLabelWidth);
+      if (column.showRoman) labelAt(ids.roman, chord.roman, cx, baseline + 1.38 * u, Math.max(21, u * 1.15), maxLabelWidth, "dim", true);
+      if (column.emphasis) {
+        const left = Math.min(...spots.map(spot => spot.x));
+        const right = Math.max(...spots.map(spot => spot.x));
+        circle(ids.emphasis, (left + right) / 2, (lowest + highest) / 2, (right - left) / 2 + 1.45 * u, (lowest - highest) / 2 + .96 * u, "화음 강조");
+      }
+    }
+    if (doc.content?.showGaps && previous && previous.column.kind === "note" && column.kind === "note") {
+      const diff = Math.abs(notes[0].pitch.midi - previous.notes[0].pitch.midi);
+      const word = diff === 1 ? "반음" : diff === 2 ? "온음" : "";
+      labelAt(`gap/${column.id}`, word, (previous.cx + cx) / 2, yb + 5.1 * u, Math.max(16, u * 1.08), (cx - previous.cx) - 4, "accent");
+    }
+    previous = { column, notes, cx };
+  }
 }
 
 /** 저장된 장면 문서를 현재 방향의 그리기 항목으로 변환한다. */
 export function buildDocumentScene(doc, portrait) {
-  const m = metricsFor(portrait);
-  const { u, x0, x1 } = m;
-  // 높은 음과 낮은 음 모두 질문 및 설명 영역 안에 들어가도록 중앙에 배치한다.
-  const yb = portrait ? 324 : 315;
+  const { metrics, fields, notation, issues } = prepareLayout(doc, portrait);
+  const groups = new Map(activeGroups(doc).map(id => [id, []]));
+  const descriptions = new Map();
   const seed = Number.isInteger(doc.renderSeed) ? doc.renderSeed : 1;
-  const groups = new Map();
-  const layoutErrors = [];
-  const put = (group, items) => {
+  const lineCounts = {};
+  const put = (group, items, description = "") => {
+    if (!group) return;
     for (const item of items) {
       item.groupId = group;
-      // 복제된 장면의 외관은 원본과 동일하게 유지한다.
+      // 복제본의 그림은 원본과 같은 씨앗을 사용한다.
       item.seedId = `${group}/${item.id}`;
       item.id = `${doc.id}/${group}/${item.id}`;
     }
     groups.set(group, items);
+    if (description) descriptions.set(group, description);
   };
-  const lineText = (group, text, x, y, size, ink = "main", align = "left") => {
-    if (!text) return;
-    const max = x1 - x0;
-    // 줄바꿈은 공백 및 문자 경계 기준. 어느 한 글자라도 미지원이면 문장 전체에 일반 글꼴을 쓴다.
-    const fallback = !hasGlyphs(text.replace(/\n/g, ""));
-    const lines = [];
-    let sourceOffset = 0;
-    for (const source of text.split("\n")) {
-      const chars = [...source];
-      let start = 0;
-      if (!chars.length) lines.push({text:"", start:sourceOffset, end:sourceOffset});
-      while (start < chars.length) {
-        let end = start + 1;
-        while (end <= chars.length && measureText(chars.slice(start,end).join(""), size, fallback) <= max) end++;
-        if (end <= chars.length) {
-          end = Math.max(start + 1, end - 1);
-          const space = chars.slice(start,end).findLastIndex(ch => /\s/u.test(ch));
-          if (space > 0) end = start + space + 1;
-        } else end = chars.length;
-        const raw = chars.slice(start,end).join("");
-        const leading = [...(raw.match(/^\s*/u)?.[0] || "")].length;
-        const trailing = [...(raw.match(/\s*$/u)?.[0] || "")].length;
-        const visibleEnd = Math.max(start + leading, end - trailing);
-        lines.push({text:chars.slice(start+leading,visibleEnd).join(""), start:sourceOffset+start+leading, end:sourceOffset+visibleEnd});
-        start = end;
-      }
-      sourceOffset += chars.length + 1;
-    }
-    if (group === "question" && lines.length > 2) layoutErrors.push({field: "question", message: "질문이 칠판을 벗어나요. 문장을 줄여 주세요."});
-    if (group === "caption" && lines.length > 3) layoutErrors.push({field: "caption", message: "정리 문장이 칠판을 벗어나요. 문장을 줄여 주세요."});
-    const result = [];
-    lines.forEach((entry, i) => {
-      const line = entry.text;
-      if (!line) return;
-      const args = { x, baseY: y + i * size * 1.2, size, ink, align, idPrefix: `${group}/line${i}`, seed: seed + hashString(group) + i * 101 };
-      if (fallback && hasGlyphs(line)) {
-        const width = measureText(line, size, true), px = align === "center" ? x - width / 2 : x;
-        result.push({type: "text", id: args.idPrefix, text: line, x: px, baseY: args.baseY, size, ink, textStart:entry.start, textEnd:entry.end});
-      } else {
-        const items = textRun(line, args);
-        for (const item of items) {
-          const index = item.type === "glyph" ? Number(item.id.split("/").at(-1)) : 0;
-          item.textStart = entry.start + index;
-          item.textEnd = item.type === "text" ? entry.end : item.textStart + 1;
-        }
-        result.push(...items);
-      }
-    });
-    put(group, result);
-  };
-  lineText("question", doc.question ? `Q. ${doc.question}` : "", x0, portrait ? 53 : 65, portrait ? 29 : 36);
-  lineText("caption", doc.caption, x0, portrait ? 527 : 526, portrait ? 25 : 28);
-  if (doc.templateId === "text-explanation") {
-    const blocks = doc.content.blocks;
-    let y = portrait ? 177 : 184;
-    const size = portrait ? 25 : 31;
-    for (const block of blocks) {
-      lineText(`body/${block.id}`, block.text, x0, y, size, block.ink);
-      const lines = groups.get(`body/${block.id}`) || [];
-      const lineCount = new Set(lines.map(item => item.type === "text" ? item.baseY : item.id.split("/").slice(0,-1).join("/"))).size || 1;
-      y += size * 1.2 * lineCount + 12;
-    }
-    if (y - 12 > (portrait ? 464 : 448)) layoutErrors.push({field: "content.blocks", message: "본문이 칠판을 벗어나요. 문장을 줄이거나 장면을 나눠 주세요."});
-  } else {
-    const staff = [0,1,2,3,4].map(i => lineStroke([[x0, yb-i*u], [x1,yb-i*u]], Math.max(2, .11*u), seed+101+i, .03*u));
-    put("staff", [{type:"line", role:"staff", id:"staff", ink:"main", strokes:staff, pen:2, parallel:true}]);
-    const clefLeft=x0+.9*u, gY=yb-u;
-    const cp=wobble(resample(clefUnits().map(([x,y])=>[clefLeft+x*u,gY+y*u]),2.5),.03*u,seed+202,90), cc=cumulative(cp);
-    put("clef", [{type:"line",role:"clef",id:"clef",ink:"main",strokes:[{pts:cp,cum:cc,len:cc[cc.length-1],width:Math.max(3,.19*u)}],pen:0}]);
-    const notes=doc.content.notes;
-    const chord=doc.templateId === "chord-stack";
-    const spots=[];
-    notes.forEach((note,i)=>{
-      const cx=chord ? x0+(x1-x0)*.62 : x0+6*u+(x1-x0-8.5*u)*i/Math.max(1,notes.length-1);
-      const idx=diatonicIndex(note.pitch), cy=noteY(note.pitch,yb,u), id=`note/${note.id}`, elements=[];
-      for(const li of ledgerIndices(idx)) {
-        const ly=yb-(li-30)*u/2, half=1.26*u;
-        elements.push({type:"line",role:"ledger",id:`ledger${li}`,ink:"main",strokes:[lineStroke([[cx-half,ly],[cx+half,ly]],Math.max(2,.13*u),seed+li*13,.05*u)],pen:0});
-      }
-      elements.push({type:"line",role:"head",id:"head",ink:"main",strokes:[headStroke(cx,cy,u,seed+idx*31+i)],pen:0,noteName:note.pitch});
-      put(id,elements); spots.push({cx,cy});
-      if (!chord && doc.content.showLabels) {
-        const label=({C:"도",D:"레",E:"미",F:"파",G:"솔",A:"라",B:"시"})[note.pitch[0]];
-        lineText(`label/${note.id}`,label,cx,yb+3.1*u,1.15*u,"main","center");
-      }
-    });
-    const addCircle=(group,cx,cy,rx,ry)=>put(group,[{type:"line",role:"circle",id:"circle",ink:"accent",strokes:[circleStroke(cx,cy,rx,ry,u,seed+606)],pen:0}]);
-    if (chord) {
-      const cx=spots[0].cx;
-      lineText("name",doc.content.chordName,cx,yb+3*u,1.25*u,"main","center");
-      lineText("roman",doc.content.roman,cx,yb+4.5*u,u,"dim","center");
-      if (doc.content.emphasis) addCircle("emphasis/chord",cx,(spots[0].cy+spots[2].cy)/2,1.45*u,Math.abs(spots[0].cy-spots[2].cy)/2+1.05*u);
-    } else {
-      notes.forEach((note,i)=>{ if(doc.content.highlightNoteIds.includes(note.id)) addCircle(`emphasis/${note.id}`,spots[i].cx,spots[i].cy,1.45*u,1.05*u); });
-    }
+  for (const field of fields) {
+    const { group, text, layout, start, maxRows, maxWidth, ink } = field;
+    lineCounts[field.field] = layout.rows.length;
+    const rows = fitVisibleRows(layout, maxRows, maxWidth);
+    put(group, rows.flatMap((row, index) => lineItems(row, {
+      x: metrics.x0, baseY: start + index * layout.lineHeight, size: layout.size, ink,
+      idPrefix: `line${index}`, seed: seed + hashString(group),
+    })), text);
   }
-  const items=[];
+  if (notation) drawNotation(doc, portrait, metrics, notation, put, seed);
+  const items = [];
   for (const step of doc.steps) {
-    const ids=[...step.groupIds];
-    for (const id of ids) {
+    for (const id of step.groupIds) {
       if (!groups.has(id)) throw new Error(`표시할 수 없는 그룹: ${id}`);
       items.push(...groups.get(id));
     }
   }
-  items.forEach((item,index)=>item.index=index);
-  return {key:doc.id, ...m, items, groups, layoutErrors, clefBox:CLEF_BOX};
+  items.forEach((item, index) => item.index = index);
+  return {
+    key: doc.id, ...metrics, items, groups, descriptions, lineCounts, layoutErrors: issues,
+    layoutWarnings: portrait ? issues : [], clefBox: CLEF_BOX,
+    noteColumns: notation?.groups.map(group => group.column.id) ?? [],
+  };
 }
-
-export { catmullRom };

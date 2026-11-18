@@ -3,35 +3,51 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>음악교육 인터렉티브 화이트보드</title>
+<meta name="description" content="장면을 만들고 손 판서와 소리로 설명하는 음악 수업 칠판">
+<!--__CSP__-->
+<title>음악 칠판 튜터</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='10' fill='%232f6f5e'/%3E%3Ctext x='11' y='36' font-size='36' fill='white'%3E♪%3C/text%3E%3C/svg%3E">
 <style>/*__STYLE__*/</style>
 </head>
 <body>
 <header class="app-header">
   <div class="brand"><span aria-hidden="true" class="brand-icon">♪</span><h1>음악 칠판</h1></div>
   <div class="scene-indicator"><strong id="sceneTitle">장면 준비 중</strong><span id="progress" aria-live="polite"></span></div>
-  <form id="sceneSearchForm" class="header-search" role="search"><input id="sceneSearch" type="search" placeholder="장면 검색" aria-label="장면 검색"><button type="submit" aria-label="검색">검색</button></form>
+  <div class="transport" aria-label="단계 진행">
+    <button id="previousStep" class="control" aria-label="이전 단계" title="이전 단계 (←)" disabled>←</button>
+    <button id="togglePlay" class="control primary" aria-label="시작" title="시작 · 일시정지">시작</button>
+    <button id="nextStep" class="control" aria-label="다음 단계" title="다음 단계 (→)">→</button>
+  </div>
   <nav class="header-nav" aria-label="판서 도구">
     <details id="sceneMenu" class="menu" name="header-menu"><summary>장면 ▾</summary><div class="dropdown menu-actions">
-      <button id="openScenes">내 장면 열기</button><button id="newScene">새 장면</button><button id="duplicateScene">현재 장면 복제</button><button id="recoverDraft">초안 복구</button><button id="editScene">내용 편집</button>
-      <hr><button id="importScenes">파일 가져오기</button><button id="exportScene">현재 장면 내보내기</button><button id="exportAll">전체 백업</button>
+      <form id="sceneSearchForm" class="header-search" role="search"><input id="sceneSearch" type="search" placeholder="장면 검색" aria-label="장면 검색"><button type="submit" aria-label="검색">검색</button></form>
+      <button id="openScenes">내 장면 열기</button><button id="newScene">새 장면</button><button id="duplicateScene">현재 장면 복제</button><button id="editScene">내용 편집</button><button id="recoverDraft">초안 복구</button>
+      <hr><button id="openLessons">수업 열기·관리</button><button id="openPractice" hidden>해보기 · 건반</button>
+      <hr><button id="importScenes">파일 가져오기</button><button id="exportScene">현재 장면 내보내기</button><button id="exportAll">전체 백업</button><button id="shareScene">장면 링크 공유</button><button id="storageStatus">저장 상태</button>
     </div></details>
-    <details class="menu" name="header-menu"><summary>판서 ▾</summary><div class="dropdown menu-actions">
-      <button id="previousStep">← 이전 단계</button><button id="nextStep">→ 다음 단계</button><button id="togglePlay">재생 · 일시정지</button><button id="previousScene">이전 장면</button><button id="nextScene">다음 장면</button><button id="restart">처음부터</button><button id="finish">이 장면 바로 완성</button>
-      <hr><label for="playMode">진행 방식</label><select id="playMode"><option value="step">단계별 진행</option><option value="auto">지정 대기 자동</option><option value="continuous">대기 없이 전체 보기</option></select>
+    <details id="toolMenu" class="menu" name="header-menu"><summary><span class="desktop-only">판서</span><span class="mobile-only">도구</span> ▾</summary><div class="dropdown menu-actions">
+      <button id="previousScene">이전 장면</button><button id="nextScene">다음 장면</button><button id="restart">처음부터</button><button id="finish">이 장면 바로 완성</button>
+      <button id="replay" disabled>다시 듣기</button><button id="hearNotes">보이는 음 듣기</button><button id="readBoard">칠판 내용 읽기</button><button id="soundToggle" aria-pressed="true">소리 켜짐</button>
+      <label for="playMode">진행 방식</label><select id="playMode"><option value="step">단계별 진행</option><option value="auto">지정 대기 자동</option><option value="continuous">대기 없이 전체 보기</option></select>
+      <div class="mobile-only tool-shortcuts"><button data-menu-target="viewMenu">보기 설정</button><button data-menu-target="helpMenu">도움말</button></div>
     </div></details>
-    <details class="menu" name="header-menu"><summary>보기 ▾</summary><section class="dropdown settings" aria-label="보기 설정">
+    <details id="viewMenu" class="menu desktop-menu" name="header-menu"><summary>보기 ▾</summary><section class="dropdown settings" aria-label="보기 설정">
+      <button id="fullscreen" class="control">전체 화면</button>
       <div class="row"><span class="lab">판</span><div class="seg" data-opt="theme"><button type="button" data-v="chalk">칠판</button><button type="button" data-v="white">화이트보드</button></div></div>
-      <div class="row"><span class="lab">손</span><div class="seg" data-opt="hand"><button type="button" data-v="hand">손 + 펜</button><button type="button" data-v="pen">펜만</button></div></div>
+      <div class="row"><span class="lab">손</span><div class="seg" data-opt="hand"><button type="button" data-v="auto">자동</button><button type="button" data-v="hand">손 + 펜</button><button type="button" data-v="pen">펜만</button></div></div>
+      <div class="row"><span class="lab">효과</span><div class="seg" data-opt="effects"><button type="button" data-v="full">전체</button><button type="button" data-v="simple">간단</button><button type="button" data-v="off">끔</button></div></div>
       <div class="row"><span class="lab">가루</span><div class="seg" data-opt="dust"><button type="button" data-v="on">날림</button><button type="button" data-v="off">없음</button></div></div>
       <div class="row"><span class="lab">속도</span><div class="seg" data-opt="speed"><button type="button" data-v="slow">느리게</button><button type="button" data-v="normal">보통</button><button type="button" data-v="fast">빠르게</button></div></div>
+      <label for="method">선 방식</label> <select id="method"><option value="svg">벡터 선</option><option value="canvas">붓 도장</option></select>
+      <label class="check-row"><input id="wakeLock" type="checkbox">수업 중 화면 켜 두기</label><p id="wakeStatus" class="note"></p>
     </section></details>
-    <details class="menu" name="header-menu"><summary>도움말 ▾</summary><div class="dropdown info"><p id="status" role="status" aria-live="polite">준비 중…</p><p>방향키 또는 Page Up/Down으로 단계를 이동하고, 스페이스바로 재생과 일시정지를 전환합니다.</p><p>내 장면은 이 브라우저에 저장됩니다. 다른 기기에서 사용하려면 백업 파일을 내보내고 가져오세요.</p><label for="method">선 방식</label> <select id="method"><option value="svg">벡터 선</option><option value="canvas">붓 도장</option></select><p class="note">글씨 윤곽: 개구체(Gaegu), SIL Open Font License 1.1.</p></div></details>
+    <details id="helpMenu" class="menu desktop-menu" name="header-menu"><summary>도움말 ▾</summary><div class="dropdown info"><h2>음악 칠판 튜터</h2><p>시작을 누르면 첫 단계가 나타납니다. 다음 단계 버튼이나 방향키·Page Up/Down으로 진행하세요. 스페이스바는 시작과 일시정지를 전환합니다.</p><p>Shift + Page Up/Down은 장면 이동입니다. 입력 칸과 열린 창에서는 해당 화면의 키 조작을 따릅니다.</p><p>내 장면은 이 브라우저에 저장됩니다. 다른 기기에서 쓰거나 자료를 보호하려면 파일 백업을 보관하세요.</p><p id="appVersion"></p><button id="fontLicenses" class="control">글꼴 및 라이선스</button></div></details>
   </nav>
   <button id="returnPreview" class="btn" hidden>미리보기 종료 · 편집으로 돌아가기</button>
+  <div class="feedback"><button id="dismissBackup" hidden>백업 안내 닫기</button><p id="status" role="status" aria-live="polite">시작을 눌러 첫 단계를 판서하세요.</p><div id="errorNotice" role="alert" hidden><span id="errorText"></span><button id="dismissError" aria-label="오류 알림 닫기">×</button></div></div>
 </header>
-<main class="board-area" aria-label="음악 판서 보드"><div id="frame" class="frame" data-theme="chalk"><div id="stage" class="stage"><canvas id="boardTex" aria-hidden="true"></canvas><div id="ink"></div><canvas id="dust" aria-hidden="true"></canvas></div></div></main>
-<input id="fileImport" type="file" accept="application/json,.json" hidden>
+<main class="board-area" aria-label="음악 판서 보드"><div id="frame" class="frame" data-theme="chalk"><div id="stage" class="stage" role="img" aria-label="음악 칠판" tabindex="0"><canvas id="boardTex" aria-hidden="true"></canvas><div id="ink" aria-hidden="true"></div><canvas id="dust" aria-hidden="true"></canvas></div></div><p id="boardDescription" hidden></p></main>
+<input id="fileImport" type="file" accept="application/json,.json" multiple hidden>
 <script>/*__SCRIPT__*/</script>
 </body>
 </html>

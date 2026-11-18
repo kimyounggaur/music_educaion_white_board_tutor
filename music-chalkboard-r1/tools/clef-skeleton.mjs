@@ -1,13 +1,18 @@
-// 안내용: Bravura 음자리표의 가운데 선(뼈대)을 뽑아 본다. 결과는 눈으로 보고 점을 찍을 때만 쓴다.
+// Bravura 음자리표의 가운데 선을 JSON과 비교용 SVG로 내보낸다.
 import fs from "node:fs";
-import { createRequire } from "node:module";
-const require = createRequire("/home/claude/spike-tools/package.json");
-const opentype = require("opentype.js");
-const TraceSkeleton = require("skeleton-tracing-js");
+import { dirname } from "node:path";
+import opentype from "opentype.js";
+import TraceSkeleton from "skeleton-tracing-js";
 
-const buf = fs.readFileSync("/home/claude/dl_bravura/package/bravura.otf");
+const [fontPath, outputBase] = process.argv.slice(2);
+if (fontPath === "--help" || !fontPath || !outputBase) {
+  console.log("사용법: node tools/clef-skeleton.mjs <Bravura.otf> <출력 경로 접두어>");
+  process.exit(fontPath === "--help" ? 0 : 1);
+}
+const buf = fs.readFileSync(fontPath);
 const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
 const g = font.charToGlyph(String.fromCodePoint(0xe050));
+if (!g.index) throw new Error("입력 글꼴에 SMuFL 높은음자리표(U+E050)가 없습니다.");
 const p = g.getPath(0, 0, 1000);
 
 function flatten(commands) {
@@ -55,7 +60,8 @@ const sk = TraceSkeleton.fromBoolArray(Array.from(grid), w, h);
 // 칸 단위로 되돌린다(G선 = 0, 아래쪽이 +)
 const toU = ([x, y]) => [(x - PAD) / 100 + bb.x1 / 250, (y - PAD) / 100 + bb.y1 / 250];
 const lines = sk.polylines.map((pl) => pl.map(toU).map(([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100]));
-fs.writeFileSync("/home/claude/r1-prototype/out/clef-skeleton.json", JSON.stringify(lines));
+fs.mkdirSync(dirname(outputBase), { recursive: true });
+fs.writeFileSync(`${outputBase}.json`, JSON.stringify(lines) + "\n");
 console.log("polylines:", lines.length, lines.map((l) => l.length).join(","));
 // 오버레이 그림
 const S = 80, ox = 160, oy = 360;
@@ -69,4 +75,4 @@ lines.forEach((l, i) => {
 });
 for (let x = -2; x <= 3; x++) svg += `<line x1="${ox + x * S}" y1="0" x2="${ox + x * S}" y2="720" stroke="#e55" stroke-width=".7" stroke-dasharray="3 5"/><text x="${ox + x * S + 3}" y="12" font-size="12" fill="#e55">${x}</text>`;
 svg += `</svg>`;
-fs.writeFileSync("/home/claude/r1-prototype/out/clef-skeleton.svg", svg);
+fs.writeFileSync(`${outputBase}.svg`, svg);

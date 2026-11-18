@@ -1,7 +1,9 @@
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';
 import {createScene} from '../src/scene-model.js';
-import {openSceneStorage,makeScenePackage} from '../src/scene-storage.js';
+import {createLesson} from '../src/lesson-model.js';
+import {openSceneStorage,makeScenePackage,DB_NAME,DB_VERSION} from '../src/scene-storage.js';
+import {splitBackupScenes} from '../src/backup-chunks.js';
 const a=await openSceneStorage(), b=await openSceneStorage();
 const source=createScene('chord-stack'); source.title='저장 테스트';
 const saved=await a.saveScene(source,{expectedRevision:null});
@@ -30,5 +32,90 @@ await a.saveDraft(draft);assert.equal((await a.getDraft('test-draft')).formData.
 const malformed=structuredClone(draft);malformed.draftId='bad-draft';malformed.formData.content={};
 await assert.rejects(a.saveDraft(malformed));assert.equal(await a.getDraft('bad-draft'),undefined);
 await a.deleteDraft('test-draft');assert.equal(await a.getDraft('test-draft'),undefined);
+
+const initialOrder=await a.listSceneSnapshot();
+const reordered=initialOrder.scenes.map(scene=>scene.id).reverse();
+await a.reorderScenes(reordered,{expectedOrderRevision:initialOrder.orderRevision});
+await assert.rejects(b.reorderScenes(reordered.toReversed(),{expectedOrderRevision:initialOrder.orderRevision}), e=>e.code==='conflict');
+assert.deepEqual((await b.listScenes()).map(scene=>scene.id),reordered);
+
+const savedLesson=await a.saveLesson(createLesson({title:'수업',sceneIds:[saved.id,copies[0].id]}));
+await b.saveLesson({...savedLesson,title:'변경 수업'},{expectedRevision:savedLesson.revision});
+await assert.rejects(a.saveLesson(savedLesson,{expectedRevision:savedLesson.revision}),e=>e.code==='conflict');
+const live=await a.getScene(saved.id);
+const existingDraft={...draft,baseRevision:live.revision};
+await a.saveDraft(existingDraft);
+const observedDraft=await a.getDraft(existingDraft.draftId);
+await b.saveDraft({...existingDraft,formData:{...existingDraft.formData,title:'복구 선택 직후 변경'}});
+const attachedDraft={...draft,draftId:'editing-session',baseRevision:live.revision};
+await a.saveDraft(attachedDraft);
+const savedAfterDraft=await a.saveScene(live,{expectedRevision:live.revision,draftId:attachedDraft.draftId,cleanupDraft:observedDraft});
+assert.equal((await a.getDraft(existingDraft.draftId)).formData.title,'복구 선택 직후 변경');
+assert.equal(await a.getDraft(attachedDraft.draftId),undefined);
+await assert.rejects(a.deleteDraft(existingDraft.draftId,{expected:observedDraft}),e=>e.code==='conflict');
+const latestDraft=await a.getDraft(existingDraft.draftId);
+await a.saveScene(savedAfterDraft,{expectedRevision:savedAfterDraft.revision,cleanupDraft:latestDraft});
+assert.equal(await a.getDraft(existingDraft.draftId),undefined);
+
+const beforePurge=await a.getScene(saved.id);
+const trash=await a.setDeleted(saved.id,beforePurge.revision,true);
+let affected;
+await assert.rejects(a.permanentlyDelete(saved.id,trash.revision),e=>{
+  affected=e.lessons;
+  return e.code==='referenced' && e.lessons[0].id===savedLesson.id;
+});
+await b.saveLesson({...affected[0],title:'확인 중 업데이트'},{expectedRevision:affected[0].revision});
+await assert.rejects(a.permanentlyDelete(saved.id,trash.revision,{removeFromLessons:true,expectedLessons:affected}), e=>e.code==='conflict');
+await a.permanentlyDelete(saved.id,trash.revision,{removeFromLessons:true,expectedLessons:await b.listLessons()});
+assert.equal(await a.getScene(saved.id),undefined);
+assert.deepEqual((await a.listLessons())[0].sceneIds,[copies[0].id]);
+
+const list=Array.from({length:501},(_,i)=>({...source,id:`backup-${i}`,title:`복원 ${i}`}));
+const grouped=splitBackupScenes(list,{soundEnabled:false},{lessons:[createLesson({sceneIds:[list[500].id,list[0].id]})]});
+const restoredSet=await a.importBundles(grouped.toReversed(),{includeSettings:true});
+assert.equal(restoredSet.scenes.length,501);
+assert.equal(await a.getSetting('soundEnabled'),false);
+assert.deepEqual(restoredSet.scenes.map(scene=>scene.title),list.map(scene=>scene.title));
+assert.deepEqual(restoredSet.lessons[0].sceneIds,[restoredSet.scenes[500].id,restoredSet.scenes[0].id]);
+const sceneCount=(await a.listScenes()).length;
+await assert.rejects(a.importBundles([grouped[0],grouped[0]]),/서로 다른/);
+assert.equal((await a.listScenes()).length,sceneCount);
+const snapshot=await a.getBackupSnapshot({includeSettings:true});
+assert.equal(snapshot.scenes.length,sceneCount);
+assert.equal(snapshot.lessons.length,2);
+assert.equal(snapshot.settings.soundEnabled,false);
+assert.equal((await a.getBackupStatus()).lastConfirmedBackupAt,null);
+await a.confirmBackup({scope:{sceneCount},snapshotAt:snapshot.snapshotAt});
+assert.equal((await a.getBackupStatus()).scope.snapshotAt,snapshot.snapshotAt);
+await b.dismissBackupReminder();
+assert.ok((await a.getBackupStatus()).reminderDismissedAt);
+
 a.close();b.close();
+const request = action => new Promise((resolve,reject)=>{
+  action.onsuccess=()=>resolve(action.result);
+  action.onerror=()=>reject(action.error);
+});
+await request(indexedDB.deleteDatabase(DB_NAME));
+const legacyOpen = indexedDB.open(DB_NAME,1);
+const legacy = {...source,id:'schema-level-v1'};
+legacyOpen.onupgradeneeded=()=>{
+  const db=legacyOpen.result;
+  db.createObjectStore('scenes',{keyPath:'id'}).add(legacy);
+  db.createObjectStore('drafts',{keyPath:'draftId'}).add(draft);
+  db.createObjectStore('settings',{keyPath:'key'});
+  db.createObjectStore('meta',{keyPath:'key'});
+};
+const old=await request(legacyOpen);
+await assert.rejects(openSceneStorage(),e=>e.code==='blocked');
+old.close();
+let closedVersion;
+const upgraded=await openSceneStorage({onVersionChange:version=>{closedVersion=version;}});
+assert.equal(upgraded.db.version,DB_VERSION);
+assert.deepEqual((await upgraded.getScene(legacy.id)).steps.map(step=>step.groupIds),legacy.steps.map(step=>step.groupIds));
+assert.equal((await upgraded.getScene(legacy.id)).schemaVersion,2);
+assert.equal((await request(upgraded.db.transaction('scenes').objectStore('scenes').get(legacy.id))).schemaVersion,1);
+assert.equal((await upgraded.getDraft(draft.draftId)).editorVersion,2);
+const later=await request(indexedDB.open(DB_NAME,DB_VERSION+1));
+assert.deepEqual(closedVersion,{oldVersion:DB_VERSION,newVersion:DB_VERSION+1});
+later.close();
 console.log('IndexedDB 충돌·휴지통·원자적 가져오기·초안 테스트 통과');
