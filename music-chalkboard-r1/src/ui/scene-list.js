@@ -1,5 +1,7 @@
+import { confirmAction } from './confirm-dialog.js';
 // 장면 목록은 임시 대화창으로만 표시한다. 데이터와 동작은 호출자가 제공한다.
 const TEMPLATE_LABELS = { 'chord-stack': '화음 쌓기', 'note-selection': '음 고르기', 'text-explanation': '글 설명' };
+const compact = value => value.replace(/[\s·ㆍ•]/gu, '');
 const normalize = (value) => String(value ?? '').normalize('NFC').toLocaleLowerCase().trim();
 const templateLabel = (scene) => TEMPLATE_LABELS[scene.templateId] || scene.templateId || '장면';
 
@@ -12,43 +14,16 @@ export function searchScenes(scenes, query) {
     const title = normalize(scene.title);
     const tags = normalize((scene.tags || []).join(' '));
     const content = scene.content || {};
-    const body = normalize([scene.question, scene.caption, templateLabel(scene), content.chordName,
+    const body = normalize([scene.question, scene.caption, templateLabel(scene), content.chordName, ...(content.columns || []).flatMap(column => [column.teacherNote, column.legacyLabel, ...(column.notes || []).map(note => note.pitch)]),
       ...(Array.isArray(content.blocks) ? content.blocks.map((block) => typeof block === 'string' ? block : block.text || '') : [])].join(' '));
     const all = `${title} ${tags} ${body}`;
+    const joined = compact(all);
     const score = title === normalized ? 0 : title.includes(normalized) ? 1 : tags.includes(normalized) ? 2 : 3;
-    return { scene, index, score, matches: words.every((word) => all.includes(word)) };
+    return { scene, index, score, matches: words.every((word) => all.includes(word) || joined.includes(compact(word))) };
   }).filter((entry) => entry.matches).sort((a, b) => a.score - b.score || a.index - b.index).map((entry) => entry.scene);
 }
 
-const css = `
-.wb-scenes { border:0; padding:0; border-radius:18px; width:min(960px,calc(100vw - 28px)); max-width:none; max-height:min(88vh,900px); color:#263b34; background:#fffefa; box-shadow:0 20px 70px #071b1490; font:15px/1.5 system-ui,sans-serif; }
-.wb-scenes::backdrop { background:#142d25ad; }
-.wb-scenes * { box-sizing:border-box; }
-.wb-scenes header { position:sticky; top:0; z-index:1; padding:18px 20px 12px; background:#fffefa; border-bottom:1px solid #dce7df; }
-.wb-scenes h2 { font-size:1.25rem; margin:0; }
-.wb-scenes .wb-title { display:flex; justify-content:space-between; align-items:center; gap:12px; }
-.wb-scenes .wb-toolbar,.wb-scenes .wb-tabs,.wb-scenes .wb-actions,.wb-scenes .wb-row-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-.wb-scenes .wb-toolbar,.wb-scenes .wb-tabs { margin-top:12px; }
-.wb-scenes input,.wb-scenes select { min-height:38px; border:1px solid #aebeb4; border-radius:8px; padding:7px 10px; background:white; color:#22372e; font:inherit; }
-.wb-scenes input[type=search] { flex:1; min-width:180px; }
-.wb-scenes button { min-height:36px; border:1px solid #b2c3b7; background:#fff; color:#254a38; border-radius:8px; padding:6px 11px; cursor:pointer; font:inherit; }
-.wb-scenes button:hover { background:#eff8f1; }
-.wb-scenes button:focus-visible,.wb-scenes input:focus-visible,.wb-scenes select:focus-visible { outline:3px solid #e5a300; outline-offset:2px; }
-.wb-scenes button[aria-selected=true],.wb-scenes .wb-primary { background:#245c40; color:white; border-color:#245c40; }
-.wb-scenes button:disabled { opacity:.45; cursor:not-allowed; }
-.wb-scenes .wb-content { padding:12px 20px 20px; }
-.wb-scenes .wb-hint { color:#5b6e63; font-size:.88rem; margin:8px 0; }
-.wb-scenes .wb-error { color:#a32621; white-space:pre-wrap; }
-.wb-scenes ul { padding:0; margin:0; list-style:none; display:grid; gap:8px; }
-.wb-scenes li { border:1px solid #dce7df; border-radius:12px; padding:12px; display:flex; justify-content:space-between; gap:12px; align-items:center; }
-.wb-scenes li > div:first-child { min-width:0; }
-.wb-scenes strong { overflow-wrap:anywhere; font-size:1rem; }
-.wb-scenes .wb-meta { font-size:.83rem; color:#607169; overflow-wrap:anywhere; margin-top:3px; }
-.wb-scenes .wb-row-actions { justify-content:flex-end; }
-.wb-scenes .wb-row-actions button { font-size:.87rem; }
-.wb-scenes .wb-empty { padding:26px 4px; text-align:center; color:#607169; }
-@media(max-width:600px) { .wb-scenes { width:100vw; height:100dvh; max-height:none; border-radius:0; } .wb-scenes header { padding:14px; } .wb-scenes .wb-content { padding:12px 14px; } .wb-scenes li { align-items:flex-start; flex-direction:column; } .wb-scenes .wb-row-actions { justify-content:flex-start; } }
-`;
+
 
 /**
  * data(): Promise<{builtins: SceneDocument[], scenes: SceneDocument[], order: string[]}>
@@ -61,9 +36,6 @@ export function openSceneList(options) {
   const previousFocus = document.activeElement;
   const dialog = document.createElement('dialog');
   dialog.className = 'wb-scenes';
-  const style = document.createElement('style');
-  style.textContent = css;
-  dialog.append(style);
   const header = document.createElement('header');
   const heading = document.createElement('div'); heading.className = 'wb-title';
   const title = document.createElement('h2'); title.id = `wb-list-${Math.random().toString(36).slice(2)}`; title.textContent = '장면 목록';
@@ -100,7 +72,7 @@ export function openSceneList(options) {
   content.append(actions, hint, error, list); dialog.append(content); document.body.append(dialog);
   let tab = options.initialTab || (normalize(options.query) ? 'all' : 'builtin'), dataset = {builtins:[], scenes:[], order:[]}, timer = 0, composing = false, showAllResults = false;
   let closed = false;
-  dialog.addEventListener('close', () => { closed = true; clearTimeout(timer); dialog.remove(); if (previousFocus && previousFocus.isConnected) previousFocus.focus(); if (options.onClose) options.onClose(); });
+  dialog.addEventListener('close', () => { closed = true; clearTimeout(timer); dialog.remove(); if (previousFocus?.isConnected) { const menu = previousFocus.closest('details'); (menu && !menu.open ? menu.querySelector('summary') : previousFocus).focus(); } if (options.onClose) options.onClose(); });
   dialog.addEventListener('cancel', () => {});
   async function refresh() {
     try { dataset = await options.data(); dataset ||= {}; render(); }
@@ -140,16 +112,16 @@ export function openSceneList(options) {
       info.append(name, meta); const commands = document.createElement('div'); commands.className = 'wb-row-actions';
       if (tab === 'trash') {
         if (options.onRestore) commands.append(button('복원', () => runAction(options.onRestore, scene)));
-        if (options.onPurge) commands.append(button('영구 삭제', () => { if (window.confirm(`“${scene.title}” 장면을 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) runAction(options.onPurge, scene); }));
+        if (options.onPurge) commands.append(button('영구 삭제', async () => { if (await confirmAction({ title: '장면 영구 삭제', message: '“' + scene.title + '” 장면을 영구 삭제할까요?', confirmLabel: '영구 삭제', destructive: true })) runAction(options.onPurge, scene); }));
       } else {
         if (options.onOpen) commands.append(button('열기', () => runAction(options.onOpen, scene, true, ids)));
         if (options.onClone) commands.append(button(scene.origin === 'builtin' ? '복제해서 편집' : '복제', () => runAction(options.onClone, scene, true)));
         if (scene.origin !== 'builtin' && options.onEdit) commands.append(button('편집', () => runAction(options.onEdit, scene, true)));
         if (options.onExport) commands.append(button('내보내기', () => runAction(options.onExport, scene)));
-        if (scene.origin !== 'builtin' && options.onDelete) commands.append(button('휴지통으로', () => { if (window.confirm(`“${scene.title}” 장면을 휴지통으로 이동할까요?`)) runAction(options.onDelete, scene); }));
+        if (scene.origin !== 'builtin' && options.onDelete) commands.append(button('휴지통으로', async () => { if (await confirmAction({ title: '휴지통으로 이동', message: '“' + scene.title + '” 장면을 휴지통으로 이동할까요?', confirmLabel: '이동' })) runAction(options.onDelete, scene); }));
         if (reorderable) {
           for (const [label, offset] of [['위로',-1],['아래로',1]]) {
-            const move = button(label, () => { const newIds = all.map((s) => s.id); [newIds[index],newIds[index+offset]] = [newIds[index+offset],newIds[index]]; runAction(options.onReorder, newIds); });
+            const move = button(label, () => { const newIds = all.map((s) => s.id); [newIds[index],newIds[index+offset]] = [newIds[index+offset],newIds[index]]; runAction(options.onReorder, newIds, false, dataset.orderRevision); });
             move.disabled = index + offset < 0 || index + offset >= all.length; move.setAttribute('aria-label', `${scene.title} ${label} 이동`); commands.append(move);
           }
         }

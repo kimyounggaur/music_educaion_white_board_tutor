@@ -1,0 +1,40 @@
+name: Check music whiteboard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: music-chalkboard-r1
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: music-chalkboard-r1/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Check the published HTML matches the build
+        run: git diff --exit-code -- dist/index.html
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: failure()
+        with:
+          name: browser-test-diagnostics
+          path: music-chalkboard-r1/test-results/
+          if-no-files-found: ignore
+          retention-days: 5

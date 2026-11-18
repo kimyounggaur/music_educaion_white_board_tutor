@@ -46,3 +46,33 @@ export function ledgerIndices(idx) {
   if (idx >= 40) for (let i = 40; i <= idx; i += 2) out.push(i);
   return out;
 }
+
+const SHARPS = ['F5', 'C5', 'G5', 'D5', 'A4', 'E5', 'B4'];
+const FLATS = ['B4', 'E5', 'A4', 'D5', 'G4', 'C5', 'F4'];
+const ACCIDENTAL_STROKES = {
+  '♯': [
+    [[-.24, -1], [-.24, .94]],
+    [[.24, -1.14], [.24, .8]],
+    [[-.5, -.25], [.49, -.46]],
+    [[-.5, .34], [.49, .13]],
+  ],
+  '♭': [
+    [[-.15, -1.11], [-.15, .78]],
+    [[-.15, .06], [.06, -.15], [.29, -.13], [.39, .07], [.35, .29], [.12, .57], [-.15, .78]],
+  ],
+  '♮': [
+    [[-.25, -1.08], [-.25, .45], [.25, .23]],
+    [[-.25, -.29], [.25, -.5], [.25, 1.04]],
+  ],
+};
+
+export function signatureSymbols(signature) {
+  return [
+    ...SHARPS.filter(note => signature[note[0]] === 1).map(pitch => ({ symbol: '♯', pitch })),
+    ...FLATS.filter(note => signature[note[0]] === -1).map(pitch => ({ symbol: '♭', pitch })),
+  ];
+}
+
+export function accidentalUnits(symbol) {
+  return ACCIDENTAL_STROKES[symbol] ?? [];
+}

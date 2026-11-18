@@ -1,6 +1,8 @@
 // 순수 계산 시험: 장면과 계획이 깨지지 않고, 시간표가 이어지는지 확인한다.
 import assert from "node:assert/strict";
-import { buildScene, SCENES, measureText, fitSize } from "../src/scene.js";
+import { buildDocumentScene } from "../src/scene.js";
+import { createSceneV2, defaultSteps } from "../src/scene-model.js";
+import { layoutParagraph } from "../src/text-layout.js";
 import { buildPlan, SPEEDS, segProgress } from "../src/plan.js";
 import { cumulative, pointAt, resample, wobble, polyLength, rng } from "../src/util.js";
 import { diatonicIndex, noteY, ledgerIndices, clefUnits } from "../src/symbols.js";
@@ -66,12 +68,16 @@ ok("음자리표 둥근 부분의 중심이 솔 줄(y=0)에서 0.1칸 안", () =
 });
 
 for (const portrait of [true, false]) {
-  for (const key of Object.keys(SCENES)) {
+  for (const key of ["chord-stack", "note-selection"]) {
     ok(`장면·계획: ${key} ${portrait ? "세로" : "가로"} (모든 속도)`, () => {
-      const scene = buildScene(key, portrait);
+      const doc = createSceneV2(key);
+      doc.question = "주요 3화음은 어떻게 만들어요?";
+      doc.caption = "함께 울리면 화음이 돼요.";
+      doc.steps = defaultSteps(doc);
+      const scene = buildDocumentScene(doc, portrait);
       assert.ok(scene.items.length > 20);
       for (const it of scene.items) {
-        for (const s of it.strokes) {
+        for (const s of it.strokes ?? []) {
           assert.ok(s.pts.length >= 2, "점이 너무 적음 " + it.id);
           assert.ok(s.pts.every((p) => Number.isFinite(p[0]) && Number.isFinite(p[1])), "숫자가 아닌 좌표 " + it.id);
           for (const [x, y] of s.pts) {
@@ -97,11 +103,11 @@ for (const portrait of [true, false]) {
 
 ok("글씨 폭 어림: 설명 줄이 판 폭 안에 들어간다", () => {
   const text = "함께 울리면 버금딸림화음이 돼요.";
-  const size = fitSize(text, 432, 34);
-  const w = measureText(text, size);
-  assert.ok(w <= 432 + 1e-6, "폭 " + w);
-  assert.ok(size >= 28, "글자가 너무 작음 " + size);
-  console.log("    설명 줄 글자 크기(세로 화면):", size.toFixed(1));
+  const layout = layoutParagraph(text, { maxWidth:432, maxRows:1, size:34, minSize:28 });
+  assert.equal(layout.overflow, false);
+  assert.equal(layout.rows.length, 1);
+  assert.ok(layout.rows[0].width <= 432);
+  assert.ok(layout.size >= 28, "글자가 너무 작음 " + layout.size);
 });
 
 console.log(`\n${n}개 시험 통과`);

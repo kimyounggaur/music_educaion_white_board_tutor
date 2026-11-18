@@ -1,7 +1,8 @@
 // 선 표현 방식 A: SVG 선 + 분필 무늬 칠.
 // 선은 stroke-dasharray/offset으로 드러내고, 글씨는 글꼴 윤곽을 채운 뒤 "획을 따라 가는 가림막(mask)"로 드러낸다.
 import { toPathD } from "./util.js";
-import { chalkTile } from "./texture.js";
+import { chalkTileURL } from "./texture.js";
+import { HAND_FONT, fallbackFamily } from "./text-layout.js";
 
 const NS = "http://www.w3.org/2000/svg";
 function el(name, attrs) {
@@ -19,12 +20,13 @@ export class SvgRenderer {
     this.scene = scene;
     this.theme = theme;
     this.chalk = theme.style === "chalk";
+    this.patternPrefix = `pat-${++maskSeq}`;
     this.nodes = new Map(); // item.index → { kind, ... }
     this.mount();
   }
 
   patternId(ink, kind) {
-    return `pat-${ink}-${kind}`;
+    return `${this.patternPrefix}-${ink}-${kind}`;
   }
 
   mount() {
@@ -37,9 +39,9 @@ export class SvgRenderer {
       let seed = 11;
       for (const ink of ["main", "accent", "dim"]) {
         for (const [kind, minAlpha] of [["line", 0.5], ["text", 0.78]]) {
-          const tile = chalkTile(this.theme.ink[ink], { size: 192, minAlpha, seed: (seed += 7) });
+          const url = chalkTileURL(this.theme.ink[ink], { size: 192, minAlpha, seed: (seed += 7) });
           const pat = el("pattern", { id: this.patternId(ink, kind), patternUnits: "userSpaceOnUse", width: 96, height: 96 });
-          const img = el("image", { width: 96, height: 96, href: tile.toDataURL("image/png") });
+          const img = el("image", { width: 96, height: 96, href: url });
           pat.appendChild(img);
           defs.appendChild(pat);
         }
@@ -64,10 +66,10 @@ export class SvgRenderer {
   buildText(g, item) {
     const id = `text-clip-${++maskSeq}`;
     const clip = el("clipPath", { id, clipPathUnits: "userSpaceOnUse" });
-    const rect = el("rect", { x: item.x, y: item.baseY - item.size * 1.4, width: 0, height: item.size * 1.8 });
+    const rect = el("rect", { x: item.x - 2, y: item.baseY - item.size * 1.4, width: 0, height: item.size * 1.8 });
     clip.appendChild(rect); this.defs.appendChild(clip);
     const node = el("text", { x: item.x, y: item.baseY, fill: this.theme.ink[item.ink],
-      "font-family": "WhiteboardKorean, sans-serif", "font-size": item.size, "font-weight": "400", "clip-path": `url(#${id})` });
+      "font-family": item.fontFamily ?? fallbackFamily(), "font-size": item.size, "font-weight": "400", "clip-path": `url(#${id})` });
     node.textContent = item.text;
     g.appendChild(node);
     this.nodes.set(item.index, { kind: "text", node, rect, item });
@@ -110,6 +112,7 @@ export class SvgRenderer {
     const mask = el("mask", {
       id,
       maskUnits: "userSpaceOnUse",
+      maskContentUnits: "userSpaceOnUse",
       x: bb.x0.toFixed(1),
       y: bb.y0.toFixed(1),
       width: (bb.x1 - bb.x0).toFixed(1),
@@ -131,23 +134,20 @@ export class SvgRenderer {
         attrs["stroke-dasharray"] = `${L} ${L}`;
         attrs["stroke-dashoffset"] = L;
       }
-      const p = el("path", attrs);
+      const p = s.len >= 1 ? el("path", attrs) : el("circle", {
+        cx: s.pts[0][0], cy: s.pts[0][1], r: item.revealW / 2, fill: "#fff", visibility: "hidden",
+      });
       mask.appendChild(p);
       polys.push({ p, L, len: s.len });
     }
     this.defs.appendChild(mask);
     const group = el("g", { mask: `url(#${id})`, visibility: "hidden" });
-    const outline = el("path", {
-      d: item.outlineD,
-      fill: this.paint(item.ink, "text"),
-      "fill-opacity": this.chalk ? 1 : 0.94,
+    const outline = el("text", {
+      x: 0, y: 0, transform: `matrix(${item.fontTransform.join(" ")})`,
+      "font-family": HAND_FONT, "font-size": item.size, "font-weight": 700, "font-kerning": "none",
+      fill: this.paint(item.ink, "text"), "fill-opacity": this.chalk ? 1 : 0.94,
     });
-    if (this.chalk) {
-      outline.setAttribute("stroke", this.paint(item.ink, "text"));
-      outline.setAttribute("stroke-width", (item.stemPx * 0.18).toFixed(2));
-      outline.setAttribute("stroke-linejoin", "round");
-      outline.setAttribute("stroke-opacity", 0.35);
-    }
+    outline.textContent = item.ch;
     group.appendChild(outline);
     g.appendChild(group);
     this.nodes.set(item.index, { kind: "glyph", group, mask, polys, done: 0 });
@@ -158,8 +158,8 @@ export class SvgRenderer {
     const n = this.nodes.get(part.item.index);
     if (!n) return;
     if (n.kind === "text") {
-      const width = n.node.getComputedTextLength?.() || [...n.item.text].length * n.item.size;
-      n.rect.setAttribute("width", String((width + 2) * p));
+      const width = n.item.width ?? [...n.item.text].length * n.item.size;
+      n.rect.setAttribute("width", String((width + 4) * p));
     } else if (n.kind === "line") {
       const q = n.paths[part.si];
       if (p > 0 && q.group.getAttribute("visibility") !== "visible") q.group.setAttribute("visibility", "visible");

@@ -1,15 +1,19 @@
 // 음자리표 손그림 길을 만들 때 모양을 맞춰 보는 도구(개발용). Bravura 글꼴의 음자리표를 회색 안내선으로만 쓴다.
-// 사용: node tools/clef-guide.mjs <출력 svg> [symbols 모듈에서 가져올 길 이름]
+// 사용: node tools/clef-guide.mjs <Bravura.otf> <출력 SVG>
 import fs from "node:fs";
-import { createRequire } from "node:module";
+import { dirname } from "node:path";
+import opentype from "opentype.js";
 import { clefUnits } from "../src/symbols.js";
-const require = createRequire("/home/claude/spike-tools/package.json");
-const opentype = require("opentype.js");
+const [fontPath, out] = process.argv.slice(2);
+if (fontPath === "--help" || !fontPath || !out) {
+  console.log("사용법: node tools/clef-guide.mjs <Bravura.otf> <출력 SVG>");
+  process.exit(fontPath === "--help" ? 0 : 1);
+}
 
-const [, , out = "/home/claude/r1-prototype/out/clef-guide.svg"] = process.argv;
-const buf = fs.readFileSync("/home/claude/dl_bravura/package/bravura.otf");
+const buf = fs.readFileSync(fontPath);
 const font = opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
 const g = font.charToGlyph(String.fromCodePoint(0xe050)); // gClef
+if (!g.index) throw new Error("입력 글꼴에 SMuFL 높은음자리표(U+E050)가 없습니다.");
 const p = g.getPath(0, 0, 1000); // 1000 = 한 em, 오선 한 칸 = 250
 const S = 80; // 한 칸 = 80px
 const k = S / 250;
@@ -31,5 +35,6 @@ if (extra) {
   svg += `<circle cx="${ox + extra[0][0] * S}" cy="${oy + extra[0][1] * S}" r="6" fill="#0a0"/>`;
 }
 svg += `</svg>`;
+fs.mkdirSync(dirname(out), { recursive: true });
 fs.writeFileSync(out, svg);
 console.log("ok", out, "bbox", bb);

@@ -1,27 +1,23 @@
-# 음악교육 인터렉티브 화이트보드
+# 음악 칠판 튜터 3.0
 
-음악 수업에서 장면을 만들고 칠판에 단계별로 표시하는 웹앱입니다. 수업 화면에는 헤더와 칠판이 표시됩니다. 장면·판서·보기 메뉴를 통해 작업합니다.
+`src/app.js`가 헤더·미리보기·저장과 수업을 연결하고, 장면 모델·배치·재생·저장소는 각각 독립된 모듈에서 동작합니다.
 
-## 사용 방법
+| 영역 | 파일 |
+| --- | --- |
+| 장면·악보·호환 | scene-model.js, theory/, lesson-model.js |
+| 입력과 목록 | scene-editor.js, ui/ |
+| 글자 배치·기보 | scene.js, text-layout.js, symbols.js, glyph-data.json |
+| 렌더링·효과 | render-svg.js, render-canvas.js, texture.js, dust.js, hand.js |
+| 단계·소리 | player.js, plan.js, audio/engine.js |
+| 파일·저장·공유 | scene-storage.js, backup-chunks.js, import-settings.js, share-link.js |
+| 수업·활동 | lessons/, practice.js |
 
-- **장면 → 내 장면 열기**에서 기본 예제를 열거나 복제합니다. **새 장면**에서는 화음 쌓기, 음 고르기, 글 설명 중 선택할 수 있습니다.
-- 편집창에서 질문과 내용, 정리 문장, 단계 순서와 자동 대기를 수정합니다. 미리보기는 저장 전 내용만 표시합니다.
-- **판서** 메뉴에서 다음·이전 단계, 재생·일시정지, 처음부터, 바로 완성을 선택합니다. 수업 화면에서 방향키·Page Up/Down·스페이스바도 사용할 수 있습니다.
-- 내 장면과 초안은 현재 브라우저에 저장됩니다. 다른 기기로 옮기거나 브라우저 데이터를 지우기 전에 **전체 백업**을 내려받으세요. 가져온 장면은 새 사본으로 추가됩니다.
-- 기본 장면은 읽기 전용입니다. 수정하려면 복제합니다. 지운 내 장면은 휴지통에서 복원할 수 있습니다.
+Node 24.x에서 `npm ci`, `npm test`, `npm run build`를 실행합니다. `npm run dev`는 기본 포트 4173에서 dist를 제공합니다. 실제 브라우저 시험은 `npm run test:e2e`입니다.
 
-## 개발 및 검증
+`npm run glyphs`는 고정된 `assets/Gaegu-Bold.ttf`의 한글·영문·숫자·기호 획을 다시 생성합니다. 원본·생성 자료의 체크섬과 도구 명령은 `assets/FONT-SOURCES.md`에서 확인할 수 있습니다. 글꼴은 설치된 모양과 같은 좌표에 중심선을 마스킹하며 미지원 글자는 기기의 글꼴로 표시합니다.
 
-```sh
-npm install
-npm test
-npm run build
-```
+장면의 `schemaVersion`, 초안의 `editorVersion`, 파일의 `version`과 IndexedDB 버전은 서로 다른 계약입니다. 앱의 DB v2에는 scenes·drafts·settings·meta·lessons가 있습니다. 기존 v1 읽기와 새 v2 쓰기를 함께 유지하고, 새 버전 이후 복구에도 v2를 읽는 호환 빌드를 사용합니다. 같은 주소의 두 탭, 기존 백업·초안·휴지통을 회귀 검수에 포함합니다.
 
-`src/`는 장면 모델과 검증, IndexedDB 저장, 편집과 목록 UI, 단계 재생기, 기존 판서 렌더러로 구성됩니다. `dist/index.html`은 esbuild로 생성하는 배포 결과물입니다. 백업에는 음악 칠판 장면만 들어가며 브라우저 외부로 자동 전송되지 않습니다.
+배포용 단일 HTML은 Gaegu 글꼴과 OFL 전문을 포함하며 CSS·JS 해시를 사용하는 CSP를 생성합니다. 빌드 재현성 검사에 맞춰 dist/index.html을 계속 추적합니다. 소스·배포 파일을 함께 커밋합니다.
 
-자동화 시험은 장면 검증, 음악 배치, 판서 계획, 저장 충돌, 백업 유효성·원자성 및 DOM 기반 주요 동작을 확인합니다. 실제 브라우저와 모바일 기기의 화면·입력·성능 검증은 별도로 필요합니다. 사용자 문장 중 개구체 윤곽에 없는 글자가 포함된 문장은 앱에 포함된 Noto Sans CJK KR 글꼴로 표시합니다. 글꼴 로딩에 실패하면 편집 화면에 안내하고 기기 기본 글꼴을 사용합니다.
-
-## 글꼴과 자료
-
-기존 손글씨 윤곽 자료는 개구체(Gaegu)를 기반으로 하며 `licenses/OFL-Gaegu.txt`를 따릅니다. 자유 문장용 Noto Sans CJK KR도 SIL OFL 1.1로 제공되며 `licenses/OFL-NotoSansCJK.txt`를 참조하세요. 음자리표 모양은 Bravura와 비교해 조정하였으나 해당 글꼴 자체를 포함하지 않습니다.
+브라우저별 실제 저장 유지 승인, iPhone Safari의 첫 소리 재생과 파일 공유, 교실 전자칠판의 터치·가독성·프레임은 실기기 검수 기록을 별도로 남깁니다.

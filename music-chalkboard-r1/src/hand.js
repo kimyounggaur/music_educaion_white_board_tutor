@@ -1,6 +1,8 @@
 // 손 층: 펜 끝 좌표를 따라 움직이는 그림 하나(translate3d만 바꾼다). 그림자는 따로 둔다.
 import { handSvg, HAND_H, HAND_W, TIP } from "./hand-art.js";
 
+let nextMaskId = 0;
+
 export class HandLayer {
   constructor(stage) {
     this.stage = stage;
@@ -18,22 +20,32 @@ export class HandLayer {
     this.scale = 0.3;
     this.inkColor = "#f3efe3";
     this.last = { x: -999, y: -999, a: 0, lift: 0 };
+    this.maskId = `hand-sleeve-${++nextMaskId}`;
     this.root.style.visibility = "hidden";
     this.shadow.style.visibility = "hidden";
   }
 
   /** 펜 종류(chalk|marker)와 보기 방식(hand|pen)을 바꾼다 */
   configure({ penKind, mode }) {
+    const updateArt = !this.svg || this.penKind !== penKind;
     this.penKind = penKind;
     this.mode = mode;
-    this.root.innerHTML = `<div class="hand-inner">${handSvg(penKind)}</div>`;
-    this.inner = this.root.firstChild;
-    this.svg = this.inner.firstChild;
+    if (updateArt) {
+      this.root.innerHTML = `<div class="hand-inner">${handSvg(penKind).replace(
+        '<g class="body">',
+        `<defs><linearGradient id="${this.maskId}-gradient" x1="0%" y1="0%" x2="35%" y2="100%">
+          <stop offset="68%" stop-color="white"/><stop offset="98%" stop-color="black"/>
+        </linearGradient><mask id="${this.maskId}" maskUnits="userSpaceOnUse" x="0" y="0" width="650" height="880">
+          <rect width="650" height="880" fill="url(#${this.maskId}-gradient)"/>
+        </mask></defs><g class="body" mask="url(#${this.maskId})">`,
+      )}</div>`;
+      this.inner = this.root.firstChild;
+      this.svg = this.inner.firstChild;
+      this._applied = null;
+      this.setInk(this.inkColor);
+    }
     this.root.classList.toggle("pen-only", mode === "pen");
     this.shadow.classList.toggle("pen-only", mode === "pen");
-    this._applied = null;
-    this.setInk(this.inkColor);
-    this.applySize();
   }
 
   setInk(color) {
@@ -45,8 +57,8 @@ export class HandLayer {
 
   /** 화면에 보이는 크기에 맞춰 손 크기를 정한다 */
   resize(stageCssW, stageCssH) {
-    // 판 높이의 약 34% (너무 크면 쓰는 곳을 가린다)
-    this.scale = (stageCssH * 0.34) / HAND_H;
+    // Keep the visible hand smaller than both edges of a narrow board.
+    this.scale = Math.min(stageCssH * 0.28, stageCssW * 0.49) / HAND_H;
     this.cssW = stageCssW;
     this.cssH = stageCssH;
     this.applySize();

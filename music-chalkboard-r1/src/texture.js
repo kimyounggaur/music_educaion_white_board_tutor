@@ -36,8 +36,21 @@ function tileNoise(size, cell, seed) {
   };
 }
 
+const tiles = new Map();
+const tileURLs = new WeakMap();
+const brushSets = new Map();
+const boardCache = new WeakMap();
+
+function remember(store, key, value) {
+  if (store.size >= 24) store.delete(store.keys().next().value);
+  store.set(key, value);
+  return value;
+}
+
 /** 분필 무늬 한 장: 색은 그대로, 투명도만 고르지 않게 한다. minAlpha 아래로는 내려가지 않는다. */
 export function chalkTile(color, { size = 192, minAlpha = 0.55, seed = 1 } = {}) {
+  const key = `${color}|${size}|${minAlpha}|${seed}`;
+  if (tiles.has(key)) return tiles.get(key);
   const cv = document.createElement("canvas");
   cv.width = cv.height = size;
   const ctx = cv.getContext("2d");
@@ -59,11 +72,19 @@ export function chalkTile(color, { size = 192, minAlpha = 0.55, seed = 1 } = {})
     }
   }
   ctx.putImageData(img, 0, 0);
-  return cv;
+  return remember(tiles, key, cv);
+}
+
+export function chalkTileURL(color, options) {
+  const tile = chalkTile(color, options);
+  if (!tileURLs.has(tile)) tileURLs.set(tile, tile.toDataURL("image/png"));
+  return tileURLs.get(tile);
 }
 
 /** 붓 도장(분필 한 번 찍은 자국) 여러 장 */
 export function chalkDabs(color, { count = 8, size = 64, seed = 5 } = {}) {
+  const key = `${color}|${count}|${size}|${seed}`;
+  if (brushSets.has(key)) return brushSets.get(key);
   const [r, g, b] = hexToRgb(color);
   const out = [];
   for (let n = 0; n < count; n++) {
@@ -90,7 +111,7 @@ export function chalkDabs(color, { count = 8, size = 64, seed = 5 } = {}) {
     ctx.putImageData(img, 0, 0);
     out.push(cv);
   }
-  return out;
+  return remember(brushSets, key, out);
 }
 
 /** 칠판 / 화이트보드 바탕을 캔버스에 그린다(씨앗값이 같으면 같은 모양) */
@@ -98,6 +119,9 @@ export function paintBoard(canvas, theme, seed = 3) {
   const ctx = canvas.getContext("2d");
   const w = canvas.width;
   const h = canvas.height;
+  const cacheKey = `${theme}|${w}|${h}|${seed}`;
+  if (boardCache.get(canvas) === cacheKey) return;
+  boardCache.set(canvas, cacheKey);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   const rand = rng(seed);
   if (theme === "chalk") {
