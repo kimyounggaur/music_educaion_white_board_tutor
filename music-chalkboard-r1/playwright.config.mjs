@@ -12,7 +12,7 @@ export default defineConfig({
   use: {
     baseURL,
     viewport: { width: 1366, height: 768 },
-    reducedMotion: 'reduce',
+    contextOptions: { reducedMotion: 'reduce' },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

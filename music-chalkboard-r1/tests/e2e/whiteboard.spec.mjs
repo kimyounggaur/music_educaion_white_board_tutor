@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { test, expect } from '@playwright/test';
 
 const INTRO = '화음이란 무엇일까요?';
@@ -7,6 +8,7 @@ const QUESTION = '세 음이 만날 때 무엇을 들을까요?';
 const errors = new WeakMap();
 
 test.beforeEach(async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   const pageErrors = [];
   errors.set(page, pageErrors);
   page.on('pageerror', error => pageErrors.push(error.message));
@@ -18,6 +20,7 @@ test.afterEach(({ page }) => {
 
 async function openBoard(page) {
   await page.goto('/');
+  await expect.poll(() => page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
   await expect(page.locator('#sceneTitle')).toHaveText(INTRO);
   await expectStage(page, 0);
 }
@@ -291,4 +294,69 @@ test('opens a restored lesson and judges an ordered piano exercise', async ({ pa
   await page.keyboard.press('Escape');
   await expect(practice).toBeHidden();
   await expect(page.locator('#sceneTitle')).toHaveText('다장조 음계 · 6단계');
+});
+
+test('checks WCAG A and AA accessibility across seven whiteboard states', async ({ page }) => {
+  test.setTimeout(60_000);
+  await openBoard(page);
+  const resolve = createRequire(import.meta.url).resolve;
+  const axeSource = await readFile(resolve('axe-core/axe.min.js'), 'utf8');
+  await page.evaluate(axeSource);
+
+  async function audit(state) {
+    await test.step(state, async () => {
+      const violations = await page.evaluate(async () => {
+        const result = await window.axe.run(document, {
+          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },
+        });
+        return result.violations
+          .filter(violation => ['critical', 'serious'].includes(violation.impact))
+          .map(({ id, impact, help, nodes }) => ({
+            id,
+            impact,
+            help,
+            nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })),
+          }));
+      });
+      expect.soft(violations, state).toEqual([]);
+    });
+  }
+
+  await audit('빈 칠판');
+  await openMenu(page, 'sceneMenu');
+  await expect(page.locator('#sceneSearch')).toBeVisible();
+  await audit('장면 메뉴');
+  const editor = await openEditor(page);
+  await expect(editor.locator('#ed-title')).toBeFocused();
+  await audit('새 장면 편집기');
+  const template = editor.locator('#ed-template');
+  await template.selectOption('text-explanation');
+  const confirmation = page.getByRole('dialog', { name: '장면 템플릿 변경' });
+  await expect(confirmation).toBeVisible();
+  await audit('템플릿 변경 확인');
+  await confirmation.getByRole('button', { name: '템플릿 변경', exact: true }).click();
+  await expect(confirmation).toBeHidden();
+  await expect(template).toHaveValue('text-explanation');
+  await editor.locator('#ed-title').fill(TITLE);
+  await editor.locator('#ed-question').fill(QUESTION);
+  await editor.getByRole('button', { name: '장면 저장', exact: true }).click();
+  await expect(editor).toBeHidden();
+  await expect(page.locator('#sceneTitle')).toHaveText(TITLE);
+  await openMenu(page, 'toolMenu');
+  await page.locator('#finish').click();
+  await expect(page.locator('#nextStep')).toBeDisabled();
+  await audit('판서가 완료된 저장 장면');
+
+  await openMenu(page, 'sceneMenu');
+  await page.locator('#openScenes').click();
+  const list = page.getByRole('dialog', { name: '장면 목록' });
+  await list.getByRole('tab', { name: '내 장면' }).click();
+  await expect(list.getByText(TITLE, { exact: true })).toBeVisible();
+  await audit('내 장면 목록');
+  await list.getByRole('button', { name: '장면 목록 닫기' }).click();
+  await expect(list).toBeHidden();
+
+  await openMenu(page, 'helpMenu');
+  await expect(page.locator('#fontLicenses')).toBeVisible();
+  await audit('도움말');
 });

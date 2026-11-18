@@ -11,12 +11,13 @@
     "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "axe-core": "4.14.1",
     "esbuild": "^0.28.2",
     "fake-indexeddb": "^6.2.8",
     "happy-dom": "^21.0.4",
     "opentype.js": "^2.0.0",
-    "skeleton-tracing-js": "^1.0.4",
-    "@playwright/test": "1.62.1"
+    "skeleton-tracing-js": "^1.0.4"
   },
   "engines": {
     "node": "24.x"
