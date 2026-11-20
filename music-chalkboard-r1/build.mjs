@@ -8,7 +8,8 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 const read = path => readFileSync(resolve(root, path), 'utf8');
 const pkg = JSON.parse(read('package.json'));
 const debug = process.argv.includes('--debug');
-const notices = 'Gaegu Bold\n' + read('licenses/OFL-Gaegu.txt');
+const notices = 'Gaegu Bold\n' + read('licenses/OFL-Gaegu.txt')
+  + '\n\nNanum Pen Script\n' + read('licenses/OFL-NanumPenScript.txt');
 const result = await build({
   absWorkingDir: root,
   entryPoints: ['src/app.js'],
@@ -30,7 +31,9 @@ const result = await build({
 });
 const js = result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
 const font = readFileSync(resolve(root, 'assets/Gaegu-Bold.woff2')).toString('base64');
-const fontCss = '@font-face{font-family:WhiteboardHand;src:url(data:font/woff2;base64,' + font + ') format("woff2");font-style:normal;font-weight:700;font-display:swap;}';
+const markerFont = readFileSync(resolve(root, 'assets/LessonMarkerBrand.woff')).toString('base64');
+const fontCss = '@font-face{font-family:WhiteboardHand;src:url(data:font/woff2;base64,' + font + ') format("woff2");font-style:normal;font-weight:700;font-display:swap;}'
+  + '@font-face{font-family:WhiteboardMarkerBrand;src:url(data:font/woff;base64,' + markerFont + ') format("woff");font-style:normal;font-weight:400;font-display:swap;}';
 const css = fontCss + ['src/style.css', 'src/ui/editor-style.css', 'src/ui/scene-list-style.css'].map(read).join('\n');
 const hash = value => createHash('sha256').update(value).digest('base64');
 const policy = [

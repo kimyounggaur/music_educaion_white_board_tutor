@@ -67,6 +67,48 @@ async function checkSavedQuestion(page) {
   await expect(editor.locator('#ed-question')).toHaveValue(QUESTION);
 }
 
+test('keeps the board signature visible through scenes, themes, and resizing', async ({ page }) => {
+  await openBoard(page);
+  const brand = page.locator('.board-brand');
+  const stage = page.locator('#stage');
+  const frame = page.locator('#frame');
+
+  async function expectBrand() {
+    await expect(brand).toHaveText('레슨 디자이너');
+    await expect(brand).toBeVisible();
+    await expect(brand).toHaveCSS('pointer-events', 'none');
+    const box = await brand.boundingBox();
+    const board = await stage.boundingBox();
+    expect(box.x).toBeGreaterThan(board.x + board.width / 2);
+    expect(box.x + box.width).toBeLessThanOrEqual(board.x + board.width);
+    expect(box.y).toBeGreaterThanOrEqual(board.y);
+    expect(box.y + box.height).toBeLessThan(board.y + board.height * .1);
+  }
+
+  await expectBrand();
+  await expect(brand).toHaveCSS('font-family', /WhiteboardHand/);
+  await page.locator('#nextStep').click();
+  await expectStage(page, 1);
+  await expectBrand();
+  await page.keyboard.press('Shift+PageDown');
+  await expect(page.locator('#sceneTitle')).not.toHaveText(INTRO);
+  await expectBrand();
+
+  await openMenu(page, 'viewMenu');
+  await page.locator('[data-opt="theme"] [data-v="white"]').click();
+  await expect(frame).toHaveAttribute('data-theme', 'white');
+  await expect(brand).toHaveCSS('font-family', /WhiteboardMarkerBrand/);
+  await expectBrand();
+  await page.locator('#method').selectOption('canvas');
+  await expectBrand();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectBrand();
+  await page.reload();
+  await expect(frame).toHaveAttribute('data-theme', 'white');
+  await expectBrand();
+});
+
 test('saves the last typed question on the first click and retains it after reload', async ({ page }) => {
   await openBoard(page);
   await saveFromQuestion(page);

@@ -364,6 +364,34 @@ select {
   overflow: hidden;
   border-radius: 5px;
   contain: layout paint;
+  container-type: size;
+}
+.board-brand {
+  position: absolute;
+  z-index: 3;
+  top: 1.25%;
+  right: 2.2%;
+  font-size: min(3cqw, 4cqh);
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+.frame[data-theme=chalk] .board-brand {
+  font-family: WhiteboardHand, cursive;
+  font-weight: 700;
+  color: #f3efe3;
+  background-image: repeating-linear-gradient(-11deg, #f3efe3 0 1px, #c3d2c3 1.3px 1.6px, #f3efe3 1.7px 2.8px);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  opacity: .9;
+}
+.frame[data-theme=white] .board-brand {
+  font-family: WhiteboardMarkerBrand, WhiteboardHand, cursive;
+  font-weight: 400;
+  color: #294b42;
+  -webkit-text-stroke: .015em currentColor;
 }
 #boardTex,
 #ink,
