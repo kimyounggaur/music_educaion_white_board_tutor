@@ -87,6 +87,7 @@ test('keeps the board signature visible through scenes, themes, and resizing', a
 
   await expectBrand();
   await expect(brand).toHaveCSS('font-family', /WhiteboardHand/);
+  await expect(brand).toHaveCSS('color', 'rgb(255, 255, 255)');
   await page.locator('#nextStep').click();
   await expectStage(page, 1);
   await expectBrand();
@@ -98,6 +99,7 @@ test('keeps the board signature visible through scenes, themes, and resizing', a
   await page.locator('[data-opt="theme"] [data-v="white"]').click();
   await expect(frame).toHaveAttribute('data-theme', 'white');
   await expect(brand).toHaveCSS('font-family', /WhiteboardMarkerBrand/);
+  await expect(brand).toHaveCSS('color', 'rgb(255, 255, 255)');
   await expectBrand();
   await page.locator('#method').selectOption('canvas');
   await expectBrand();
