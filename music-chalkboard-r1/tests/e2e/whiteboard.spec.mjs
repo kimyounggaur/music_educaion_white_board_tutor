@@ -26,7 +26,7 @@ async function openBoard(page) {
 }
 
 async function expectStage(page, index) {
-  await expect(page.locator('#progress')).toHaveText(new RegExp(`^${index}\\s*/\\s*\\d+`));
+  await expect(page.locator('#progress')).toHaveText(new RegExp(`^(?:\\d+/\\d+ · )?${index}\\s*/\\s*\\d+`));
 }
 
 async function openMenu(page, menuId) {

@@ -1,7 +1,7 @@
 import { CARD_DEFINITIONS, generateCard, materializeCard, getCardParamOptions } from '../cards/index.js';
 import { getColumns } from '../scene-model.js';
 import { formatNoteLabel, keyNameKo } from '../theory/korean.js';
-import { MAJOR_KEY_TONICS, MINOR_KEY_TONICS } from '../theory/scale.js';
+import { MAJOR_KEY_TONICS, MINOR_KEY_TONICS, keySignatureAccidentals } from '../theory/scale.js';
 import { isStaffPitch, parsePitch } from '../theory/pitch.js';
 import { openDialog, makeButton, paragraph } from './dialog.js';
 
@@ -25,6 +25,7 @@ export function openTopicPicker({unit = 'scene', source, onScene, onLesson, getL
   view.content.append(grid);
   let selected = CARD_DEFINITIONS.find(card => card.id === source?.cardId) || CARD_DEFINITIONS[0];
   let values = {}, raw = null;
+  let labelsTouched = false;
   const make = makeButton('장면 만들기', async () => {
     if (!raw) return;
     const result = materializeCard(raw, {idPrefix:identity(), now:new Date().toISOString(), renderSeed:Math.floor(Math.random() * 0x7fffffff)});
@@ -77,6 +78,7 @@ export function openTopicPicker({unit = 'scene', source, onScene, onLesson, getL
   }
   function choose(card, initial = false, previousValues = null) {
     selected = card;
+    if (!previousValues) labelsTouched = !!(initial && source?.params && Object.hasOwn(source.params,'labels'));
     cardButtons.forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.cardId === card.id)));
     values = Object.fromEntries((card.params || []).map(param=>[param.id,param.default]));
     values.unit = unit;
@@ -119,15 +121,21 @@ export function openTopicPicker({unit = 'scene', source, onScene, onLesson, getL
         values[param.id] = options.find(option=>String(typeof option === 'string' ? option : option.value) === input.value)?.value ?? input.value;
       }
       input.name = param.id;
+      input.setAttribute('aria-label',param.label);
       input.addEventListener('change',()=>{
         values[param.id] = param.type === 'boolean' ? input.checked : param.type === 'number' ? Number(input.value) : param.options?.find(option=>String(option.value) === input.value)?.value ?? input.value;
+        if (param.id === 'labels') labelsTouched = true;
+        if (param.id === 'key' && selected.id === 'names-and-solfege' && !labelsTouched) {
+          const [tonic,mode] = values.key.split(':');
+          values.labels = Object.values(keySignatureAccidentals(tonic,mode)).filter(Boolean).length >= 3 ? 'movable-do' : 'both';
+        }
         if (['key','form','degree'].includes(param.id)) { choose(selected,false,{...values}); conditions.querySelector(`[name="${param.id}"]`)?.focus(); }
         else recompute();
       });
       row.append(input); conditions.append(row);
     }
     const row = document.createElement('label'); row.className='topic-field'; row.textContent='만들 단위';
-    const select = document.createElement('select'); select.name='unit';
+    const select = document.createElement('select'); select.name='unit'; select.setAttribute('aria-label','만들 단위');
     for (const [value,label] of [['scene','한 장면'],['lesson','수업 한 묶음']]) {
       if (value === 'lesson' && !card.buildLesson) continue;
       const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);
