@@ -66,16 +66,20 @@ function assertDraft(draft) {
   };
   const max = (value, limit) => typeof value === 'string' && count(value) <= limit;
   const isId = value => max(value, 128);
+  const sourceOk = source => required(source,['cardId','cardVersion','params']) && max(source.cardId,40) && Number.isInteger(source.cardVersion) && source.cardVersion > 0
+    && isObject(source.params) && Object.keys(source.params).length <= 8 && Object.entries(source.params).every(([key,value]) => max(key,40) && (typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value) || max(value,120)));
   // A draft may be semantically invalid while the user is editing, but its
   // complete structure must be safe to render without executing user data.
-  const notationV2 = draft.editorVersion === 2 && form.templateId !== 'text-explanation';
-  if (!required(form, [...FORM_KEYS]) || !TEMPLATE_IDS.includes(form.templateId) || form.templateVersion !== (notationV2 ? 2 : 1))
+  const notationV2 = draft.editorVersion === 2 && ['chord-stack','note-selection'].includes(form.templateId);
+  const notationV3 = notationV2 && form.templateVersion === 3;
+  if (!required(form, [...FORM_KEYS]) || !TEMPLATE_IDS.includes(form.templateId) || !(notationV2 ? [2,3].includes(form.templateVersion) : form.templateVersion === 1))
     fail('invalid', '초안의 템플릿 또는 필드가 올바르지 않습니다.');
   if (!max(form.title,40) || !max(form.question,80) || !max(form.caption,120)) fail('invalid', '초안의 문장이 길이 제한을 넘었습니다. 내용을 복사한 뒤 줄여 주세요.');
   if (!Array.isArray(form.tags) || form.tags.length > 5 || form.tags.some(tag => !max(tag,12))) fail('invalid', '초안의 태그가 제한을 넘었습니다.');
   const stepFields = ['id','label','groupIds','advance','holdMs'];
   const cueOk = cue => {
     if (cue?.type === 'listen') {
+      if (form.templateId === 'diagram') return required(cue,['type','items']) && Array.isArray(cue.items) && cue.items.length <= 32 && cue.items.every(isId);
       return required(cue, ['type','targets']) && Array.isArray(cue.targets) && cue.targets.length <= 32
         && cue.targets.every(target => required(target,['columnId']) && isId(target.columnId));
     }
@@ -98,17 +102,34 @@ function assertDraft(draft) {
     const columnKeys = ['id','kind','notes','labelMode','highlightNoteIds'];
     const controls = ['emphasis','showName','showRoman'];
     const labels = ['teacherMemo','legacyName','legacyRoman'];
-    const columnOk = col => isObject(col) && only(col,col.kind === 'chord' ? [...columnKeys,...controls,...labels] : columnKeys)
-      && columnKeys.every(key => Object.hasOwn(col,key)) && isId(col.id) && ['note','chord'].includes(col.kind)
-      && notesOk(col.notes) && (col.kind === 'note' ? col.notes.length === 1 : col.notes.length >= 3 && col.notes.length <= 4)
-      && NOTE_LABEL_MODES.includes(col.labelMode)
+    const labelModes = notationV3 ? NOTE_LABEL_MODES : NOTE_LABEL_MODES.filter(mode=>mode !== 'count');
+    const columnOk = col => isObject(col) && only(col,['chord','dyad'].includes(col.kind) ? [...columnKeys,...controls,...labels] : columnKeys)
+      && columnKeys.every(key => Object.hasOwn(col,key)) && isId(col.id) && (notationV3 ? ['note','chord','dyad'] : ['note','chord']).includes(col.kind)
+      && notesOk(col.notes) && (col.kind === 'note' ? col.notes.length === 1 : col.kind === 'dyad' ? col.notes.length === 2 : col.notes.length >= 3 && col.notes.length <= 4)
+      && labelModes.includes(col.labelMode)
       && Array.isArray(col.highlightNoteIds) && col.highlightNoteIds.length <= 4 && col.highlightNoteIds.every(isId)
       && controls.every(key => !Object.hasOwn(col,key) || typeof col[key] === 'boolean')
       && labels.every(key => !Object.hasOwn(col,key) || max(col[key],key === 'teacherMemo' ? 80 : 20));
-    if (!isObject(c) || !only(c,['key','columns','showGaps']) || !required(c.key,['tonic','mode'])
+    const extra = ['splitSignature','intervals','clef','source','scaleType','gapLabels'];
+    if (!isObject(c) || !only(c,['key','columns','showGaps',...(notationV3 ? extra : [])]) || !required(c.key,['tonic','mode'])
       || !max(c.key.tonic,20) || !['major','minor'].includes(c.key.mode)
       || !Array.isArray(c.columns) || c.columns.length > MAX_NOTATION_COLUMNS || !c.columns.every(columnOk)
       || (Object.hasOwn(c,'showGaps') && typeof c.showGaps !== 'boolean')) fail('invalid', '초안의 악보 내용이 올바르지 않습니다.');
+    if (notationV3 && ((Object.hasOwn(c,'splitSignature') && typeof c.splitSignature !== 'boolean')
+      || (Object.hasOwn(c,'clef') && c.clef !== 'treble')
+      || (Object.hasOwn(c,'scaleType') && !max(c.scaleType,30))
+      || (Object.hasOwn(c,'gapLabels') && (!Array.isArray(c.gapLabels) || c.gapLabels.length > 7 || c.gapLabels.some(value=>!max(value,12))))
+      || (Object.hasOwn(c,'intervals') && (!Array.isArray(c.intervals) || c.intervals.length > 4 || c.intervals.some(value=>!required(value,['id','from','to']) || !isId(value.id) || !isId(value.from) || !isId(value.to))))
+      || (Object.hasOwn(c,'source') && !sourceOk(c.source)))) fail('invalid','초안의 확장 악보 내용이 올바르지 않습니다.');
+  } else if (form.templateId === 'diagram') {
+    if (!isObject(c) || !only(c,['kind','items','arrows','hairpins','phrases','source']) || !['sequence','ladder','line'].includes(c.kind)
+      || !Array.isArray(c.items) || c.items.length > 7 || c.items.some(item=>!isObject(item) || !only(item,['id','label','sub','ink','level','tempo'])
+        || !isId(item.id) || !max(item.label,12) || (Object.hasOwn(item,'sub') && !max(item.sub,12)) || !['main','accent'].includes(item.ink)
+        || ['level','tempo'].some(key=>Object.hasOwn(item,key) && (typeof item[key] !== 'number' || !Number.isFinite(item[key]))))
+      || (Object.hasOwn(c,'arrows') && typeof c.arrows !== 'boolean')
+      || (Object.hasOwn(c,'hairpins') && (!Array.isArray(c.hairpins) || c.hairpins.length > 2 || c.hairpins.some(value=>!['up','down'].includes(value))))
+      || (Object.hasOwn(c,'phrases') && (!isObject(c.phrases) || Object.entries(c.phrases).length > 7 || Object.entries(c.phrases).some(([key,value])=>!max(key,12) || !max(value,40))))
+      || (Object.hasOwn(c,'source') && !sourceOk(c.source))) fail('invalid','초안의 도식 내용이 올바르지 않습니다.');
   } else if (form.templateId === 'chord-stack') {
     if (!required(c,['preset','notes','chordName','roman','emphasis']) ||
       !['custom','C-major-I','C-major-IV','C-major-V'].includes(c.preset) ||
@@ -419,6 +440,34 @@ export class SceneStorage {
       lesson.updatedAt = time;
       store.put(lesson);
       return lesson;
+    });
+  }
+
+  /** Generated scenes and their lesson become visible only after one commit. */
+  async saveGeneratedLesson(documents, document) {
+    if (!Array.isArray(documents) || !documents.length || documents.length > 50) fail('invalid', '수업은 1~50장면이어야 합니다.');
+    const scenes = clone(documents), lesson = clone(document);
+    const ids = new Set();
+    for (const scene of scenes) {
+      if (scene.origin !== 'user' || scene.revision !== 1 || scene.deletedAt || String(scene.id).startsWith('builtin:') || ids.has(scene.id)) fail('invalid', '새 장면의 식별자와 저장 상태를 확인해 주세요.');
+      assertDocument(scene);
+      ids.add(scene.id);
+    }
+    if (lesson.origin !== 'user' || lesson.revision !== 1 || String(lesson.id).startsWith('builtin:')) fail('invalid', '새 수업의 저장 상태를 확인해 주세요.');
+    assertLesson(lesson, ids);
+    if (lesson.sceneIds.length !== ids.size || lesson.sceneIds.some((id,index) => id !== scenes[index].id)) fail('invalid', '생성된 수업의 장면 순서를 확인해 주세요.');
+    checkSize({scenes, lesson});
+    return transaction(this.db, ['scenes','lessons','meta'], 'readwrite', async tx => {
+      const {records, order, orderRevision} = await readSceneRecords(tx);
+      if (records.filter(scene => !scene.deletedAt).length + scenes.length > MAX_ACTIVE_SCENES) fail('limit', '활성 장면은 최대 1,000개입니다.');
+      const store = tx.objectStore('scenes'), lessons = tx.objectStore('lessons'), meta = tx.objectStore('meta');
+      // add(), rather than put(), prevents concurrent tabs from overwriting IDs.
+      for (const scene of scenes) store.add(scene);
+      lessons.add(lesson);
+      meta.put({key:'sceneOrder', value:reconcileSceneOrder([...order, ...lesson.sceneIds], [...records, ...scenes])});
+      if (!records.length) meta.put({key:'firstSceneAt', value:now()});
+      updateOrderRevision(meta, orderRevision);
+      return {scenes, lesson};
     });
   }
 

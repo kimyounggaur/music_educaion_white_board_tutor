@@ -1,6 +1,6 @@
 {
   "name": "music-chalkboard-r1",
-  "version": "3.0.0",
+  "version": "3.1.0-rc.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,8 @@
     "test": "node tools/test.mjs",
     "glyphs": "node tools/build-glyphs.mjs assets/Gaegu-Bold.ttf tools/glyph-text.txt src/glyph-data.json",
     "dev": "node tools/serve.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:rhythm-prototype": "node prototypes/rhythm/build.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

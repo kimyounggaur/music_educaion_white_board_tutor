@@ -9,7 +9,7 @@ export { buildKeyboard } from './theory/keyboard.js';
 export function createPracticePlan(scene, cue) {
   if (cue?.type !== 'practice' || !['free', 'sequential'].includes(cue.order) || !Array.isArray(cue.columnIds)) return null;
   const labelMode = cue.keyboard?.labelMode ?? 'none';
-  const keys = buildKeyboard(cue.keyboard?.from, cue.keyboard?.to);
+  const keys = buildKeyboard(cue.keyboard?.from, cue.keyboard?.to, scene.content?.key);
   const byId = new Map(getColumns(scene).map(column => [column.id, column]));
   const pitches = [];
   for (const id of cue.columnIds) {

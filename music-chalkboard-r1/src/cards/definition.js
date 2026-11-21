@@ -1,0 +1,13 @@
+import { MAJOR_KEY_TONICS, MINOR_KEY_TONICS, STAFF_MINOR_KEY_TONICS } from '../theory/scale.js';
+import { keyNameKo } from '../theory/korean.js';
+import { CARD_REVIEW } from './common.js';
+import { buildPrimaryLesson, buildPrimaryScene } from './primary.js';
+export const MAJOR_KEY_OPTIONS = MAJOR_KEY_TONICS.map(tonic => ({ value: `${tonic}:major`, label: keyNameKo(tonic) }));
+export const MINOR_KEY_OPTIONS = MINOR_KEY_TONICS.map(tonic => ({ value: `${tonic}:minor`, label: keyNameKo(tonic, 'minor') }));
+export const select = (id, label, values, defaultValue) => ({ id, label, type: 'select', options: values.map(value => typeof value === 'string' ? ({ value, label: value }) : value), default: defaultValue });
+export const staffMinorOptions = MINOR_KEY_OPTIONS.filter(option => STAFF_MINOR_KEY_TONICS.includes(option.value.split(':')[0]));
+export const keyParam = (minor = false, both = false, limited = false) => ({ id: 'key', label: '조', type: 'key', default: minor ? 'A:minor' : 'C:major', options: both ? [...MAJOR_KEY_OPTIONS, ...staffMinorOptions] : minor ? limited ? staffMinorOptions : MINOR_KEY_OPTIONS : MAJOR_KEY_OPTIONS });
+export const labelsParam = (both = false, none = true, initial = 'movable-do') => select('labels', '이름표', [...(both ? [{ value: 'both', label: '둘 다' }] : []), { value: 'movable-do', label: '계이름' }, { value: 'ko', label: '음이름' }, ...(none ? [{ value: 'none', label: '없음' }] : [])], initial);
+export const practiceParam = { id: 'practice', label: '건반 해보기 넣기', type: 'boolean', default: true };
+export const definition = (id, title, summary, group, grade, params, buildScene, buildLesson) => ({ id, version: 1, title, summary, group, grade, review: CARD_REVIEW, params, buildScene, ...(buildLesson ? { buildLesson } : {}) });
+export const primary = (id, title, summary, group, grade, params) => definition(id, title, summary, group, grade, params, options => buildPrimaryScene(id, options), options => buildPrimaryLesson(id, options));

@@ -1,10 +1,13 @@
 import {
-  CHORD_PRESETS, MAX_NOTATION_COLUMNS, NOTE_LABEL_MODES, createScene, createSceneV2, defaultSteps, reconcileSteps, validateScene,
+  CHORD_PRESETS, MAX_NOTATION_COLUMNS, NOTE_LABEL_MODES, DIAGRAM_PHRASE_IDS, createScene, createSceneV2, defaultSteps, reconcileSteps, validateScene, notationTemplateVersion,
 } from './scene-model.js';
 import { checkDocumentLayout, hasGlyphs } from './scene.js';
 import { describeChord, formatNoteLabel, keyNameKo } from './theory/korean.js';
-import { LETTERS, accidentalText, parsePitch } from './theory/pitch.js';
-import { MAJOR_KEY_TONICS } from './theory/scale.js';
+import { LETTERS, accidentalText, parsePitch, formatPitch } from './theory/pitch.js';
+import { pitchFromMidi } from './theory/keyboard.js';
+import { describeInterval } from './theory/interval.js';
+import { describeDiatonicChord } from './theory/chord.js';
+import { MAJOR_KEY_TONICS, MINOR_KEY_TONICS } from './theory/scale.js';
 import { confirmAction } from './ui/confirm-dialog.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, character => (
@@ -12,11 +15,11 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, character => (
 ));
 const copy = value => structuredClone(value);
 const newId = prefix => prefix + (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
-const templateLabels = { 'chord-stack': '화음 쌓기', 'note-selection': '음 고르기', 'text-explanation': '글 설명' };
+const templateLabels = { 'chord-stack': '화음 쌓기', 'note-selection': '음 고르기', 'text-explanation': '글 설명', diagram: '도식' };
 const presetLabels = { 'C-major-I': '다장조 으뜸화음 I', 'C-major-IV': '다장조 버금딸림화음 IV', 'C-major-V': '다장조 딸림화음 V', custom: '직접 입력' };
 const labelModes = {
   none: '표시하지 않기', 'fixed-do': '고정도 계이름 (도=C)', 'movable-do': '이동도 계이름 (으뜸음=도)',
-  ko: '한글 음이름 (다·라·마)', en: '영문 음이름 (C·D·E)', both: '이동도와 한글 음이름',
+  ko: '한글 음이름 (다·라·마)', en: '영문 음이름 (C·D·E)', both: '이동도와 한글 음이름', count: '차례 숫자',
 };
 const naturalPitches = Array.from({ length: 19 }, (_, index) => `${LETTERS[index % 7]}${4 + Math.floor(index / 7)}`);
 const accidentalLabels = { '': '제자리음', '#': '올림음 (♯)', b: '내림음 (♭)' };
@@ -48,6 +51,13 @@ function pitchOptions(selected, extended = false) {
   if (allowed.includes(selected)) return optionsHtml(values, selected);
   return '<option value="" selected disabled>음을 선택하세요</option>' + optionsHtml(values);
 }
+function keyboardPitchOptions(selected) {
+  const values = Array.from({ length: 128 }, (_, midi) => pitchFromMidi(midi)).filter(pitch => pitch.acc === 0).map(pitch => {
+    const name = formatPitch(pitch);
+    return [name, `${pitchText(name)} (${name})`];
+  });
+  return optionsHtml(values, selected);
+}
 
 function move(items, index, delta) {
   const target = index + delta;
@@ -67,28 +77,41 @@ function moveButtons(prefix, item, index, length, min, label) {
 
 function notationControls(content) {
   const { key, columns } = content;
-  const keyValues = [
-    ...Array.from(MAJOR_KEY_TONICS, tonic => [`${tonic}:major`, keyNameKo(tonic, 'major')]),
-    ['A:minor', '가자연단음계'],
-  ];
   return `
     <label for="ed-key">조</label>
     <select id="ed-key" data-field="key" ${pathAttr('content.key', '조')}>
-      ${optionsHtml(keyValues, `${key.tonic}:${key.mode}`)}
+      ${[['major', MAJOR_KEY_TONICS, '장조'], ['minor', MINOR_KEY_TONICS, '단조']].map(([mode, tonics, label]) => `<optgroup label="${label}">${optionsHtml(tonics.map(tonic => [`${tonic}:${mode}`, keyNameKo(tonic, mode)]), `${key.tonic}:${key.mode}`)}</optgroup>`).join('')}
     </select>
     <p class="ed-muted">음과 변화음을 실제 연주할 높이로 선택하세요. 조표를 바꿔도 선택한 음은 유지됩니다.</p>
+    <label>음계 종류 <select data-field="scaleType" ${pathAttr('content.scaleType', '음계 종류')}>${optionsHtml([['', '조의 기본 음계'], ['natural', '자연단음계'], ['harmonic', '화성단음계'], ['melodic', '가락단음계']], content.scaleType || '')}</select></label>
     <label><input type="checkbox" data-field="showGaps" ${checked(content.showGaps)}> 이웃한 음 사이에 온음·반음 표시</label>
+    <label><input type="checkbox" data-field="splitSignature" ${checked(content.splitSignature)}> 조표를 한 개씩 단계로 나누기</label>
     <div class="ed-list">${columns.map(notationColumn).join('')}</div>
     <div class="ed-inline">
       ${command('column-add-note', '음표 열 추가', disabled(columns.length >= MAX_NOTATION_COLUMNS))}
       ${command('column-add-chord', '화음 열 추가', disabled(columns.length >= MAX_NOTATION_COLUMNS))}
-    </div>`;
+      ${command('column-add-dyad', '2음 열 추가', disabled(columns.length >= MAX_NOTATION_COLUMNS))}
+    </div>
+    <details class="ed-interval-section"><summary>음정 표시</summary><div class="ed-intervals">${intervalControls(content)}</div></details>`;
+}
+
+function intervalControls(content) {
+  const notes = content.columns.flatMap(column => column.notes);
+  const choices = notes.map((note, index) => [note.id, `${index + 1}번 ${pitchText(note.pitch, content.key)} (${note.pitch})`]);
+  const options = selected => `${choices.some(([id]) => id === selected) ? '' : `<option value="${esc(selected)}" selected>삭제된 음 · 다시 선택해 주세요</option>`}${optionsHtml(choices, selected)}`;
+  return `${(content.intervals || []).map((interval, index) => `<div class="ed-card ed-inline">
+    <label>아래 음 <select data-interval="${esc(interval.id)}" data-end="from" ${pathAttr(`content.intervals.${index}.from`, '음정의 아래 음')}>${options(interval.from)}</select></label>
+    <label>위 음 <select data-interval="${esc(interval.id)}" data-end="to" ${pathAttr(`content.intervals.${index}.to`, '음정의 위 음')}>${options(interval.to)}</select></label>
+    ${command('interval-remove', '음정 표시 삭제', actionId('interval-remove', interval.id))}
+    <span data-interval-readout="${esc(interval.id)}"></span>
+  </div>`).join('')}${command('interval-add', '음정 표시 추가', disabled((content.intervals?.length || 0) >= 4 || notes.length < 2))}`;
 }
 
 function notationColumn(column, index, columns) {
   const base = `content.columns.${index}`;
-  const label = `${index + 1}열 ${column.kind === 'chord' ? '화음' : '음표'}`;
+  const label = `${index + 1}열 ${column.kind === 'chord' ? '화음' : column.kind === 'dyad' ? '2음' : '음표'}`;
   const chord = column.kind === 'chord';
+  const dyad = column.kind === 'dyad';
   return `
     <fieldset class="ed-card" data-column="${esc(column.id)}">
       <legend class="ed-legend">${label}</legend>
@@ -114,6 +137,7 @@ function notationColumn(column, index, columns) {
       <label>음 표시 <select data-label-mode="${esc(column.id)}" ${track(`label/${column.id}`)}>
         ${optionsHtml(NOTE_LABEL_MODES.map(mode => [mode, labelModes[mode] ?? mode]), column.labelMode)}
       </select></label>
+      ${dyad ? `<label><input type="checkbox" data-chord-edit="showName" ${checked(column.showName)}> 음정 이름 표시</label><p class="ed-muted" data-dyad-readout></p>` : ''}
       ${chord ? `
         <div class="ed-inline">
           <label><input type="checkbox" data-chord-edit="showName" ${track(`name/${column.id}`)} ${checked(column.showName)}> 화음 이름 표시</label>
@@ -182,6 +206,83 @@ function textControls(blocks) {
     ${command('block-add', '본문 추가', disabled(blocks.length >= 6))}`;
 }
 
+const diagramKinds = [['sequence', '차례 상자'], ['ladder', '계단'], ['line', '줄 세우기']];
+const phraseChoices = [['', '듣기 예시 없음'], ...DIAGRAM_PHRASE_IDS.map((id,index) => [id, index < 3 ? `가락 ${'ABC'[index]}` : `변주 가락 ${index - 2}`])];
+function diagramControls(content) {
+  const phraseKeys = content.kind === 'sequence' ? [...new Set(content.items.map(item => item.label))] : ['all'];
+  return `<label>꼴 <select data-field="diagramKind">${optionsHtml(diagramKinds, content.kind)}</select></label>
+    <div class="ed-list">${content.items.map((item, index, items) => `<fieldset class="ed-card" data-diagram-item="${esc(item.id)}">
+      <legend>${index + 1}번째 항목</legend>
+      <label>글자 <input data-diagram-text="label" data-id="${esc(item.id)}" ${pathAttr(`content.items.${index}.label`, `${index + 1}번째 글자`)} value="${esc(item.label)}"></label>
+      <label>아래 글자 <input data-diagram-text="sub" data-id="${esc(item.id)}" ${pathAttr(`content.items.${index}.sub`, `${index + 1}번째 아래 글자`)} value="${esc(item.sub)}"></label>
+      <label>색 <select data-diagram-value="ink" data-id="${esc(item.id)}">${optionsHtml([['main', '기본색'], ['accent', '강조색']], item.ink)}</select></label>
+      ${content.kind === 'ladder' ? `<label>세기 <input type="number" min="0.1" max="1" step="0.05" data-diagram-text="level" data-id="${esc(item.id)}" value="${esc(item.level ?? 0.6)}" ${pathAttr(`content.items.${index}.level`, '듣기 세기')}></label>` : ''}
+      ${content.kind === 'line' ? `<label>빠르기 (BPM) <input type="number" min="40" max="200" step="1" data-diagram-text="tempo" data-id="${esc(item.id)}" value="${esc(item.tempo ?? 96)}" ${pathAttr(`content.items.${index}.tempo`, '듣기 빠르기')}></label>` : ''}
+      <div class="ed-inline">${moveButtons('diagram', item, index, items.length, 2, `${index + 1}번째 항목`)}</div>
+    </fieldset>`).join('')}</div>
+    ${command('diagram-add', '항목 추가', disabled(content.items.length >= 7))}
+    ${content.kind === 'sequence' ? `<label><input type="checkbox" data-field="arrows" ${checked(content.arrows)}> 상자 사이 화살표</label>` : ''}
+    ${content.kind === 'ladder' ? `<div class="ed-inline">${[['up', '점점 세게'], ['down', '점점 여리게']].map(([value, label]) => `<label><input type="checkbox" data-hairpin="${value}" ${checked(content.hairpins?.includes(value))}> ${label}</label>`).join('')}</div>` : ''}
+    <details><summary>소리 예시</summary>${phraseKeys.map(key => `<label>${key === 'all' ? '모든 항목의' : esc(key)} 가락 <select data-phrase="${esc(key)}">${optionsHtml(phraseChoices, content.phrases?.[key] || '')}</select></label>`).join('')}</details>`;
+}
+
+function autoKeyboard(columns) {
+  const midi = columns.flatMap(column => column.notes.map(note => parsePitch(note.pitch)?.midi)).filter(Number.isFinite);
+  if (!midi.length) return null;
+  const whites = new Set([0, 2, 4, 5, 7, 9, 11]);
+  let from = Math.min(...midi), to = Math.max(...midi);
+  while (!whites.has(from % 12)) from--;
+  while (!whites.has(to % 12)) to++;
+  if (from === to) { if (to < 127) { do { to++; } while (!whites.has(to % 12)); } else from--; }
+  if (from < 0 || to > 127 || to - from > 24) return null;
+  return { from: formatPitch(pitchFromMidi(from)), to: formatPitch(pitchFromMidi(to)) };
+}
+
+function activityColumns(draft, index) {
+  const shown = new Set(draft.steps.slice(0, index + 1).flatMap(step => step.groupIds));
+  return (draft.content.columns || []).filter(column => column.notes.every(note => shown.has(`note/${note.id}`)));
+}
+
+function cueMarkup(draft, step, index) {
+  const diagram = draft.templateId === 'diagram';
+  if (!diagram && (!draft.content.columns || draft.schemaVersion !== 2)) return '';
+  const cue = step.cue;
+  const columns = activityColumns(draft, index);
+  const selected = diagram ? cue?.items || [] : cue?.type === 'listen' ? (cue.targets || []).map(target => target.columnId) : cue?.columnIds || [];
+  const targets = diagram ? draft.content.items.filter(item => new Set(draft.steps.slice(0, index + 1).flatMap(current => current.groupIds)).has(`box/${item.id}`)).map(item => [item.id, item.label])
+    : columns.map(column => [column.id, `${draft.content.columns.indexOf(column) + 1}열 ${column.kind === 'chord' ? '화음 ' : ''}${column.notes.map(note => pitchText(note.pitch, draft.content.key)).join(' ')} `]);
+  if (diagram) for (const id of selected) if (!draft.content.items.some(item => item.id === id)) targets.push([id, `삭제된 항목 (${id}) · 선택을 해제해 주세요`]);
+  const naturalOrder = diagram ? draft.content.items.map(item => item.id) : draft.content.columns.map(column => column.id);
+  const ordered = naturalOrder.filter(id => selected.includes(id));
+  const custom = cue?.type === 'listen' && JSON.stringify(ordered) !== JSON.stringify(selected);
+  const range = autoKeyboard(columns.filter(column => selected.includes(column.id)));
+  const manualRange = cue?.type === 'practice' && (!range || cue.keyboard?.from !== range.from || cue.keyboard?.to !== range.to);
+  return `<details class="ed-cue" ${cue ? 'open' : ''}><summary>이 단계의 활동${cue ? ` · ${cue.type === 'listen' ? '듣기' : '건반 해보기'}` : ''}</summary>
+    <label>이 단계의 활동 <select data-cue-type="${esc(step.id)}" ${track(`cue-type/${step.id}`)}>${optionsHtml([['none', '없음'], ['listen', '듣기'], ...(!diagram ? [['practice', '건반 해보기']] : [])], cue?.type || 'none')}</select></label>
+    ${cue ? `<p class="ed-muted">활동이 있는 단계는 판서를 마친 뒤에만 소리를 냅니다.</p>
+      ${custom ? '<p class="ed-muted">지정된 순서입니다. 대상을 바꾸면 악보 순서로 바뀝니다.</p>' : ''}
+      <fieldset class="ed-cue-targets"><legend>${cue.type === 'practice' ? '정답이 될 열' : '들을 대상'}</legend>
+        ${targets.map(([id, label]) => `<label><input type="checkbox" data-cue-target="${esc(step.id)}" value="${esc(id)}" ${checked(selected.includes(id))}> ${esc(label)}</label>`).join('') || '<p>이 단계까지 보여 준 대상이 없어요.</p>'}
+      </fieldset>
+      ${cue.type === 'practice' ? `<div class="ed-inline"><label>순서 <select data-cue-order="${esc(step.id)}">${optionsHtml([['free', '자유'], ['sequential', '차례로']], cue.order)}</select></label>
+        <label>건반 범위 <select data-cue-range="${esc(step.id)}">${optionsHtml([['auto', '자동'], ['manual', '직접']], manualRange ? 'manual' : 'auto')}</select></label></div>
+        <div class="ed-inline" data-keyboard-range-row ${manualRange ? '' : 'hidden'}>
+          <label>왼쪽 흰 건반 <select data-cue-key="from" data-id="${esc(step.id)}">${keyboardPitchOptions(cue.keyboard?.from)}</select></label>
+          <label>오른쪽 흰 건반 <select data-cue-key="to" data-id="${esc(step.id)}">${keyboardPitchOptions(cue.keyboard?.to)}</select></label></div>
+        <label>건반 이름표 <select data-cue-label="${esc(step.id)}">${optionsHtml(NOTE_LABEL_MODES.filter(mode => mode !== 'count').map(mode => [mode, labelModes[mode]]), cue.keyboard?.labelMode || 'none')}</select></label>` : ''}` : ''}
+  </details>`;
+}
+
+function activitySummary(draft) {
+  return draft.steps.flatMap((step, index) => {
+    if (!step.cue) return [];
+    const cue = step.cue;
+    const ids = cue.items || (cue.type === 'listen' ? cue.targets.map(target => target.columnId) : cue.columnIds);
+    const labels = ids.map(id => draft.templateId === 'diagram' ? draft.content.items.find(item => item.id === id)?.label || '삭제된 항목' : `${draft.content.columns.findIndex(column => column.id === id) + 1}열`);
+    return [`${index + 1}단계 ${cue.type === 'listen' ? '듣기' : '해보기'}: ${labels.join(' → ')}${cue.type === 'practice' ? ` ${cue.order === 'sequential' ? '차례로' : '자유'}, 건반 ${cue.keyboard.from}~${cue.keyboard.to}` : ''}`];
+  }).join('\n');
+}
+
 function describeGroups(draft) {
   const descriptions = new Map(Object.entries({
     question: '질문', caption: '정리 문장', staff: '오선', clef: '높은음자리표', 'key-signature': '조표',
@@ -191,11 +292,21 @@ function describeGroups(draft) {
   const columns = draft.content.columns || [];
   let number = 0;
   for (const [index, column] of columns.entries()) {
-    descriptions.set(`name/${column.id}`, `${index + 1}열 화음 이름`);
+    descriptions.set(`name/${column.id}`, `${index + 1}열 ${column.kind === 'dyad' ? '음정' : '화음'} 이름`);
     descriptions.set(`roman/${column.id}`, `${index + 1}열 로마 숫자`);
     descriptions.set(`emphasis-column/${column.id}`, `${index + 1}열 화음 강조`);
     descriptions.set(`gap/${column.id}`, `${index}~${index + 1}열 간격`);
+    descriptions.set(`dyad-name/${column.id}`, `${index + 1}열 음정 이름`);
   }
+  for (let index = 1; index <= 7; index++) descriptions.set(`key-signature/${index}`, `조표 ${index}번째`);
+  const notes = columns.flatMap(column => column.notes);
+  for (const interval of draft.content.intervals || []) descriptions.set(`interval/${interval.id}`, `${notes.findIndex(note => note.id === interval.from) + 1}~${notes.findIndex(note => note.id === interval.to) + 1}번 음의 음정`);
+  descriptions.set('axis', '가로줄');
+  for (const [index, item] of (draft.content.items || []).entries()) {
+    for (const [prefix, label] of [['box', '상자'], ['box-label', '글자'], ['box-sub', '아래 글자'], ['arrow', '들어오는 화살표']]) descriptions.set(`${prefix}/${item.id}`, `${index + 1}번째 ${label}`);
+  }
+  descriptions.set('hairpin/up', '점점 세게');
+  descriptions.set('hairpin/down', '점점 여리게');
   for (const note of columns.length ? columns.flatMap(column => column.notes) : draft.content.notes || []) {
     number++;
     const label = `${number} (${pitchText(note.pitch, draft.content.key)})`;
@@ -236,6 +347,7 @@ function stepsMarkup(draft, labels) {
             ${pathAttr(`steps.${index}.holdMs`, `${index + 1}단계 대기 시간`)} value="${esc(step.holdMs)}">
         </label>
       </div>
+      ${cueMarkup(draft, step, index)}
     </div>`;
   }).join('');
 }
@@ -280,10 +392,10 @@ function editorMarkup(isNew, allowTemplateChange, onExportDraft) {
           <section class="ed-content-section"><h3 data-template-heading></h3><div class="ed-template"></div></section>
           <section class="ed-stage-section"><h3>판서 순서</h3>
             <p class="ed-muted">판서할 내용을 선택해 단계에서 분리하거나 다음 단계와 병합할 수 있습니다.</p>
-            <div class="ed-steps"></div><p>${command('reset-steps', '기본 순서로 되돌리기')}</p>
+            <div class="ed-steps"></div><p class="ed-inline"><span data-activity-actions></span>${command('reset-steps', '기본 순서로 되돌리기')}</p>
           </section>
         </div>
-        <aside><h3>내용 확인</h3><div class="ed-preview"></div><p data-review-steps></p>
+        <aside><h3>내용 확인</h3><div class="ed-preview"></div><p data-review-steps></p><p class="ed-activity-summary" data-activity-summary></p>
 
         </aside>
       </div>
@@ -305,7 +417,7 @@ function editorMarkup(isNew, allowTemplateChange, onExportDraft) {
 
 /** The editor owns an isolated draft. Callbacks never get mutable editor state. */
 export function openSceneEditor({
-  scene, onSave, onPreview, onDraft, onDiscard, onExportDraft, onClose, isNew = false,
+  scene, onSave, onPreview, onDraft, onDiscard, onExportDraft, onClose, onRegenerate, isNew = false,
   allowTemplateChange = false, preserveInitialDraft = false, fontAvailable = true,
   getLayoutFeedback = checkDocumentLayout,
 } = {}) {
@@ -399,21 +511,23 @@ export function openSceneEditor({
     const templateSelect = find('#ed-template');
     if (templateSelect) templateSelect.value = template;
 
-    const markup = template === 'text-explanation'
+    const markup = template === 'diagram' ? diagramControls(draft.content) : template === 'text-explanation'
       ? textControls(draft.content.blocks)
       : Array.isArray(draft.content.columns) ? notationControls(draft.content) : legacyControls(draft);
     const templatePanel = find('.ed-template');
-    const existingList = renderedTemplate === template && templatePanel.querySelector('.ed-list');
+    const existingList = template !== 'diagram' && renderedTemplate === template && templatePanel.querySelector('.ed-list');
     if (existingList) {
       const parsed = document.createElement('template');
       parsed.innerHTML = markup;
       const updatedList = parsed.content.querySelector('.ed-list');
       existingList.replaceChildren(...updatedList.children);
-      for (const action of ['block-add', 'column-add-note', 'column-add-chord', 'note-add']) {
+      for (const action of ['block-add', 'column-add-note', 'column-add-chord', 'column-add-dyad', 'note-add']) {
         const control = act(action);
         const updated = parsed.content.querySelector(`[data-action="${action}"]`);
         if (control && updated) control.disabled = updated.disabled;
       }
+      const intervals = templatePanel.querySelector('.ed-intervals');
+      if (intervals) intervals.innerHTML = intervalControls(draft.content);
     } else {
       templatePanel.innerHTML = markup;
       renderedTemplate = template;
@@ -424,6 +538,16 @@ export function openSceneEditor({
     const selected = new Set(all('[data-split]:checked').map(input => input.dataset.focusKey));
     stepList.innerHTML = stepsMarkup(draft, describeGroups(draft));
     for (const input of all('[data-split]')) input.checked = selected.has(input.dataset.focusKey);
+    find('[data-activity-actions]').innerHTML = draft.schemaVersion === 2 && (draft.content.columns || draft.templateId === 'diagram')
+      ? command('step-add-listen', '듣기 단계 추가', disabled(draft.steps.length >= 12)) + (draft.content.columns ? command('step-add-practice', '해보기 단계 추가', disabled(draft.steps.length >= 12)) : '') : '';
+  }
+
+  function syncTemplateVersion() {
+    if (draft.schemaVersion !== 2 || !draft.content.columns) return;
+    draft.templateVersion = notationTemplateVersion(draft);
+    if (draft.templateVersion === 2) {
+      for (const key of ['splitSignature', 'intervals', 'clef', 'scaleType', 'gapLabels']) delete draft.content[key];
+    }
   }
 
   function syncSteps() {
@@ -467,6 +591,7 @@ export function openSceneEditor({
 
   function refresh({ requireValid = false, focusError = false } = {}) {
     clearTimeout(reviewTimer);
+    syncTemplateVersion();
     const model = validateScene(draft);
     let layout = {};
     try {
@@ -521,30 +646,53 @@ export function openSceneEditor({
     const content = draft.content;
     let preview;
     const handText = [draft.question && `Q. ${draft.question}`, draft.caption];
-    if (content.blocks) {
+    if (draft.templateId === 'diagram') {
+      preview = content.items.map(item => [item.label, item.sub].filter(Boolean).join(' · ')).join('\n');
+      handText.push(preview);
+    } else if (content.blocks) {
       preview = content.blocks.map(block => block.text).join('\n');
       handText.push(preview);
     } else if (content.columns) {
       preview = content.columns.map((column, index) => {
         const notes = column.notes.map(note => `${pitchText(note.pitch, content.key)} (${note.pitch})`).join(' · ');
-        const chord = column.kind === 'chord' ? describeChord(column, content.key) : null;
+        const chord = column.kind === 'chord' ? describeChord(column, content.key, draft.templateVersion === 3) : null;
         if (chord) {
           const readout = all('[data-column]').find(element => element.dataset.column === column.id)?.querySelector('[data-theory-readout]');
-          const summary = [chord.name, chord.roman].filter(Boolean).join(' · ');
+          const quality = describeDiatonicChord(column.notes.map(note => note.pitch), content.key).qualityName;
+          const summary = [quality && `성질 ${quality}`, chord.name && `기능 ${chord.name}`, chord.roman].filter(Boolean).join(' · ');
           if (readout) {
             const label = chord.warning && !chord.roman ? '판서에 표시' : '이론 계산';
             readout.textContent = summary ? `${label} · ${summary}` : '이 조와 구성음에 해당하는 자동 화음 이름이 없습니다.';
           }
           handText.push(chord.name, chord.roman);
         }
+        if (column.kind === 'dyad') {
+          const interval = describeInterval(column.notes[0]?.pitch, column.notes[1]?.pitch);
+          const readout = all('[data-column]').find(element => element.dataset.column === column.id)?.querySelector('[data-dyad-readout]');
+          if (readout) readout.textContent = interval?.name || '음정을 확인해 주세요.';
+        }
         return [`${index + 1}열 · ${notes}`, chord?.name, chord?.roman].filter(Boolean).join(' · ');
       }).join('\n');
+      const notes = content.columns.flatMap(column => column.notes);
+      for (const interval of content.intervals || []) {
+        const readout = all('[data-interval-readout]').find(element => element.dataset.intervalReadout === interval.id);
+        const from = notes.find(note => note.id === interval.from), to = notes.find(note => note.id === interval.to);
+        if (readout) readout.textContent = describeInterval(from?.pitch, to?.pitch)?.name || '음정을 확인해 주세요.';
+      }
     } else {
       preview = content.notes.map(note => `${pitchText(note.pitch)} (${note.pitch})`).join(' · ');
       handText.push(content.chordName, content.roman);
     }
     find('.ed-preview').textContent = [draft.question, preview, draft.caption].filter(Boolean).join('\n\n');
     find('[data-review-steps]').textContent = `${draft.steps.length}단계 · ${templateLabels[draft.templateId]}`;
+    find('[data-activity-summary]').textContent = activitySummary(draft);
+    let sourceNotice = find('[data-source-notice]');
+    if (content.source && !sourceNotice) {
+      sourceNotice = document.createElement('div'); sourceNotice.dataset.sourceNotice = '';
+      sourceNotice.className = 'ed-source-notice';
+      find('.ed-content-section').prepend(sourceNotice);
+      sourceNotice.innerHTML = `<p>주제 카드로 만든 장면</p>${onRegenerate ? command('regenerate', '조건 바꿔 다시 만들기') : ''}`;
+    }
 
     const fontMessages = [];
     if (handText.some(text => text && !hasGlyphs(text.replace(/\s/g, '')))) fontMessages.push('손글씨 획이 없는 문자는 일반 글꼴로 표시해요.');
@@ -573,6 +721,16 @@ export function openSceneEditor({
     else if (control.dataset.memo) content.columns.find(column => column.id === control.dataset.memo).teacherMemo = control.value;
     else if (control.dataset.stepLabel) draft.steps.find(step => step.id === control.dataset.stepLabel).label = control.value;
     else if (control.dataset.hold) draft.steps.find(step => step.id === control.dataset.hold).holdMs = Number(control.value);
+    else if (control.dataset.diagramText) {
+      const field = control.dataset.diagramText;
+      const item = draft.content.items.find(item => item.id === control.dataset.id);
+      const previous = item[field];
+      item[field] = ['level', 'tempo'].includes(field) ? Number(control.value) : control.value;
+      if (field === 'label' && content.kind === 'sequence' && content.phrases?.[previous] && previous !== item.label) {
+        if (!content.phrases[item.label]) content.phrases[item.label] = content.phrases[previous];
+        if (!content.items.some(other => other.label === previous)) delete content.phrases[previous];
+      }
+    }
     else return false;
     return true;
   }
@@ -598,6 +756,8 @@ export function openSceneEditor({
     const scroll = body.scrollTop;
     const previousSteps = draft.steps.length;
     const active = document.activeElement;
+    const previousCues = draft.steps.filter(step => step.cue).map(step => ({ id: step.id, cue: JSON.stringify(step.cue) }));
+    syncTemplateVersion();
     const needsSteps = syncSteps();
     if (template) renderTemplate();
     if (needsSteps || steps) renderSteps();
@@ -612,6 +772,7 @@ export function openSceneEditor({
     if (showRemoval && draft.steps.length < previousSteps) {
       status(`삭제한 내용의 판서 참조를 정리하고 빈 단계 ${previousSteps - draft.steps.length}개를 지웠어요.`);
     }
+    if (showRemoval && previousCues.some(previous => JSON.stringify(draft.steps.find(step => step.id === previous.id)?.cue) !== previous.cue)) status('삭제한 열의 듣기 대상을 정리하고 정답이 지워진 해보기 활동을 제거했어요.');
   }
 
   function finish(result) {
@@ -693,13 +854,48 @@ export function openSceneEditor({
     } else if (field === 'preset') {
       applyPreset(control.value);
       changed({ template: true, focusKey: 'preset' });
-    } else if (['emphasis', 'showLabels', 'showGaps'].includes(field)) {
+    } else if (['emphasis', 'showLabels', 'showGaps', 'splitSignature', 'arrows'].includes(field)) {
       content[field] = control.checked;
+      if (!control.checked && field === 'splitSignature') delete content.splitSignature;
+      changed({ steps: field === 'splitSignature' });
+    } else if (field === 'scaleType') {
+      if (control.value) content.scaleType = control.value;
+      else delete content.scaleType;
       changed();
     } else if (field === 'key') {
       const [tonic, mode] = control.value.split(':');
       content.key = { tonic, mode };
       changed();
+    } else if (field === 'diagramKind') {
+      content.kind = control.value;
+      delete content.arrows; delete content.hairpins; delete content.phrases;
+      if (content.kind === 'sequence') content.arrows = true;
+      for (const item of content.items) {
+        delete item.level; delete item.tempo;
+        if (content.kind === 'ladder') item.level = 0.6;
+        if (content.kind === 'line') item.tempo = 96;
+      }
+      changed({ template: true, steps: true });
+    } else if (control.dataset.diagramText) {
+      update(control);
+      changed({ template: control.dataset.diagramText === 'label', steps: true });
+    } else if (control.dataset.diagramValue) {
+      content.items.find(item => item.id === control.dataset.id)[control.dataset.diagramValue] = control.value;
+      changed();
+    } else if (control.dataset.hairpin) {
+      content.hairpins = ['up', 'down'].filter(direction => direction === control.dataset.hairpin ? control.checked : content.hairpins?.includes(direction));
+      changed();
+    } else if (control.dataset.phrase) {
+      content.phrases ||= {};
+      if (control.value) content.phrases[control.dataset.phrase] = control.value;
+      else delete content.phrases[control.dataset.phrase];
+      if (!Object.keys(content.phrases).length) delete content.phrases;
+      changed();
+    } else if (control.dataset.interval) {
+      content.intervals.find(interval => interval.id === control.dataset.interval)[control.dataset.end] = control.value;
+      changed();
+    } else if (Object.keys(control.dataset).some(name => name.startsWith('cue'))) {
+      editCue(control);
     } else if (note || accidental) {
       const notes = content.columns ? content.columns.flatMap(column => column.notes) : content.notes;
       const selected = notes.find(item => item.id === (note || accidental));
@@ -736,6 +932,48 @@ export function openSceneEditor({
     }
   }
 
+  function editCue(control) {
+    const type = control.dataset.cueType;
+    const step = draft.steps.find(item => item.id === (type || control.dataset.cueTarget || control.dataset.cueOrder || control.dataset.cueRange || control.dataset.cueLabel || control.dataset.id));
+    if (!step) return;
+    const index = draft.steps.indexOf(step);
+    const diagram = draft.templateId === 'diagram';
+    const visible = activityColumns(draft, index);
+    if (type) {
+      if (control.value === 'none') delete step.cue;
+      else if (control.value === 'listen') step.cue = diagram ? { type: 'listen', items: draft.content.items.filter(item => draft.steps.slice(0,index+1).some(current => current.groupIds.includes(`box/${item.id}`))).map(item => item.id) } : { type: 'listen', targets: visible.map(column => ({ columnId: column.id })) };
+      else step.cue = { type: 'practice', order: 'free', columnIds: visible.map(column => column.id), keyboard: { ...(autoKeyboard(visible) || { from: 'C4', to: 'C5' }), labelMode: 'none' } };
+      if (step.cue && !(step.cue.items || step.cue.targets || step.cue.columnIds)?.length) {
+        delete step.cue; control.value = 'none';
+        status('이 단계까지 보여 준 음이나 항목이 있어야 활동을 넣을 수 있어요.', true); return;
+      }
+    } else if (!step.cue) return;
+    else if (control.dataset.cueTarget) {
+      const ids = all('[data-cue-target]').filter(input => input.dataset.cueTarget === step.id && input.checked).map(input => input.value);
+      if (diagram) step.cue.items = draft.content.items.filter(item => ids.includes(item.id)).map(item => item.id);
+      else if (step.cue.type === 'listen') step.cue.targets = draft.content.columns.filter(column => ids.includes(column.id)).map(column => ({ columnId: column.id }));
+      else {
+        const previousRange = autoKeyboard(draft.content.columns.filter(column => step.cue.columnIds.includes(column.id)));
+        const automatic = previousRange && previousRange.from === step.cue.keyboard.from && previousRange.to === step.cue.keyboard.to;
+        step.cue.columnIds = draft.content.columns.filter(column => ids.includes(column.id)).map(column => column.id);
+        if (automatic) Object.assign(step.cue.keyboard, autoKeyboard(draft.content.columns.filter(column => ids.includes(column.id))) || {});
+      }
+    } else if (control.dataset.cueOrder) step.cue.order = control.value;
+    else if (control.dataset.cueLabel) step.cue.keyboard.labelMode = control.value;
+    else if (control.dataset.cueKey) step.cue.keyboard[control.dataset.cueKey] = control.value;
+    else if (control.dataset.cueRange) {
+      if (control.value === 'auto') {
+        const range = autoKeyboard(draft.content.columns.filter(column => step.cue.columnIds.includes(column.id)));
+        if (range) Object.assign(step.cue.keyboard, range);
+        else status('정답 음을 두 옥타브 이하의 건반 범위에 넣을 수 없어요.', true);
+      } else {
+        control.closest('.ed-cue').querySelector('[data-keyboard-range-row]').hidden = false;
+        scheduleDraft(); refresh(); return;
+      }
+    }
+    changed({ steps: true, focusKey: `cue-type/${step.id}` });
+  }
+
   function exerciseEdit(action, id) {
     const content = draft.content;
     const isBlock = action.startsWith('block-');
@@ -768,10 +1006,11 @@ export function openSceneEditor({
       let item;
       if (isColumn) {
         const chord = action === 'column-add-chord';
-        const notes = (chord ? ['C4', 'E4', 'G4'] : ['C4']).map(pitch => ({ id: newId('n'), pitch }));
+        const dyad = action === 'column-add-dyad';
+        const notes = (chord ? ['C4', 'E4', 'G4'] : dyad ? ['C4', 'E4'] : ['C4']).map(pitch => ({ id: newId('n'), pitch }));
         item = {
-          id: newId('c'), kind: chord ? 'chord' : 'note', notes, labelMode: 'none', highlightNoteIds: [],
-          ...(chord ? { showName: true, showRoman: true } : {}),
+          id: newId('c'), kind: chord ? 'chord' : dyad ? 'dyad' : 'note', notes, labelMode: 'none', highlightNoteIds: [],
+          ...(chord ? { showName: true, showRoman: true } : dyad ? { showName: true } : {}),
         };
       } else {
         item = isBlock ? { id: newId('b'), text: '새 문장을 입력하세요.', ink: 'main' } : { id: newId('n'), pitch: 'C4' };
@@ -797,14 +1036,24 @@ export function openSceneEditor({
 
   async function editStep(action, id, trigger) {
     const index = draft.steps.findIndex(step => step.id === id);
+    if (action === 'step-add-listen' || action === 'step-add-practice') {
+      if (draft.steps.length >= 12) { status('단계는 최대 12개까지 만들 수 있어요.', true); return; }
+      const stepId = newId('s');
+      draft.steps.push({ id: stepId, label: action === 'step-add-listen' ? '소리 듣기' : '건반에서 눌러 보세요', groupIds: [], advance: 'manual', holdMs: 0 });
+      editCue({ dataset: { cueType: stepId }, value: action === 'step-add-listen' ? 'listen' : 'practice' });
+      return;
+    }
     if (action === 'reset-steps') {
+      const activities = draft.steps.filter(step => step.cue).map(step => ({ ...copy(step), id: step.groupIds.length ? newId('s') : step.id, groupIds: [] }));
+      const defaults = defaultSteps(draft);
+      if (defaults.length + activities.length > 12) { status('활동을 보존하면 12단계를 넘어요. 활동이나 판서를 먼저 합쳐 주세요.', true); return; }
       if (!await confirmEdit({
         title: '기본 판서 순서로 되돌리기',
-        message: '직접 변경한 단계 이름과 판서 순서·대기 설정을 초기화합니다.',
+        message: '판서 순서·대기 설정을 초기화하고 활동은 원래 순서대로 뒤에 보존합니다.',
         confirmLabel: '되돌리기',
         returnFocus: trigger,
       })) return;
-      draft.steps = defaultSteps(draft);
+      draft.steps = [...defaults, ...activities];
       changed({ steps: true });
       return;
     }
@@ -814,7 +1063,9 @@ export function openSceneEditor({
     if (action === 'step-up' || action === 'step-down') {
       if (!move(draft.steps, index, action === 'step-up' ? -1 : 1)) return;
     } else if (action === 'step-merge' && index < draft.steps.length - 1) {
+      if (draft.steps[index].cue && draft.steps[index + 1].cue) { status('두 단계 모두 활동이 있어 병합할 수 없어요. 활동 하나를 먼저 지워 주세요.', true); return; }
       draft.steps[index].groupIds.push(...draft.steps[index + 1].groupIds);
+      if (draft.steps[index + 1].cue) draft.steps[index].cue = copy(draft.steps[index + 1].cue);
       draft.steps.splice(index + 1, 1);
     } else if (action === 'step-split') {
       const chosen = all('[data-split]:checked').filter(input => input.dataset.split === id).map(input => input.value);
@@ -827,8 +1078,10 @@ export function openSceneEditor({
         return;
       }
       const stepId = newId('s');
+      const cue = draft.steps[index].cue;
+      delete draft.steps[index].cue;
       draft.steps[index].groupIds = draft.steps[index].groupIds.filter(group => !chosen.includes(group));
-      draft.steps.splice(index + 1, 0, { id: stepId, label: '새 단계', groupIds: chosen, advance: 'manual', holdMs: 0 });
+      draft.steps.splice(index + 1, 0, { id: stepId, label: '새 단계', groupIds: chosen, advance: 'manual', holdMs: 0, ...(cue ? { cue } : {}) });
       focusKey = `step-label/${stepId}`;
     }
     changed({ steps: true, focusKey });
@@ -837,6 +1090,32 @@ export function openSceneEditor({
       changed({ steps: true, focusKey: `step-label/${id}` });
       status('선행 조건을 지키는 순서로 내용을 배치해 주세요.', true);
     }
+  }
+
+  function editInterval(action, id) {
+    if (action === 'interval-remove') {
+      draft.content.intervals = (draft.content.intervals || []).filter(interval => interval.id !== id);
+      if (!draft.content.intervals.length) delete draft.content.intervals;
+    } else {
+      const notes = draft.content.columns.flatMap(column => column.notes);
+      if (notes.length < 2 || (draft.content.intervals?.length || 0) >= 4) return;
+      (draft.content.intervals ||= []).push({ id: newId('i'), from: notes[0].id, to: notes.at(-1).id });
+    }
+    changed({ template: true, steps: true });
+  }
+
+  function editDiagram(action, id) {
+    const items = draft.content.items;
+    const index = items.findIndex(item => item.id === id);
+    if (action === 'diagram-add' && items.length < 7) items.push({ id: newId('b'), label: draft.content.kind === 'sequence' ? 'A' : '새 항목', sub: '', ink: 'main', ...(draft.content.kind === 'ladder' ? { level: 0.6 } : draft.content.kind === 'line' ? { tempo: 96 } : {}) });
+    else if (action === 'diagram-remove' && items.length > 2 && index >= 0) {
+      const [removed] = items.splice(index, 1);
+      if (draft.content.kind === 'sequence' && draft.content.phrases && !items.some(item => item.label === removed.label)) delete draft.content.phrases[removed.label];
+    }
+    else if (action === 'diagram-up' || action === 'diagram-down') move(items, index, action === 'diagram-up' ? -1 : 1);
+    else return;
+    changed({ template: true, steps: true, showRemoval: action === 'diagram-remove' });
+    if (action === 'diagram-remove' && draft.steps.some(step => step.cue?.items?.includes(id))) status('삭제한 항목을 가리키는 듣기 대상이 남아 있어요. 활동에서 해당 선택을 해제한 뒤 저장해 주세요.', true);
   }
 
   async function saveOrPreview(action, trigger) {
@@ -928,7 +1207,22 @@ export function openSceneEditor({
         status(error?.message || '초안 파일을 내보내지 못했어요.', true);
       }
     } else if (['save', 'preview', 'preview-step'].includes(action)) await saveOrPreview(action, trigger);
+    else if (action === 'regenerate' && onRegenerate) {
+      if (await confirmEdit({ title: '조건 바꿔 다시 만들기', message: '카드의 조건을 다시 골라 내용과 판서 순서가 새로운 장면을 만듭니다. 현재 편집 내용은 별도로 유지합니다.', confirmLabel: '조건 고르기', returnFocus: trigger })) {
+        try {
+          clearTimeout(timer);
+          await draftQueue;
+          if (dirty && onDraft) await onDraft(copy(draft));
+          dialog.close();
+          if (await onRegenerate(copy(draft)) === true) finish({ regenerated: true });
+        }
+        catch (error) { status(error?.message || '주제 카드를 열지 못했어요.', true); }
+        finally { if (dialog.isConnected && !dialog.open) { dialog.showModal(); trigger.focus(); } }
+      }
+    }
     else if (action === 'reset-steps' || action?.startsWith('step-')) await editStep(action, id, trigger);
+    else if (action?.startsWith('interval-')) editInterval(action, id);
+    else if (action?.startsWith('diagram-')) editDiagram(action, id);
     else if (action && /^(block|note|column)-/.test(action)) exerciseEdit(action, id);
   });
   dialog.addEventListener('cancel', event => {

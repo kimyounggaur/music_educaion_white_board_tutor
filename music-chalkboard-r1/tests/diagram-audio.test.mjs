@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {buildDiagramTimeline,DIAGRAM_TUNES} from '../src/rhythm/diagram-audio.js';
+import {validateRhythm} from '../src/theory/rhythm.js';
+for(const [id,tune]of Object.entries(DIAGRAM_TUNES))assert.deepEqual(validateRhythm(tune),[],id);
+const content={kind:'ladder',items:[.15,.3,.45,.6,.8,1].map((level,i)=>({id:'b'+i,label:'p',level})),phrases:{all:'tune-a'}};
+const timeline=buildDiagramTimeline(content,{items:content.items.map(i=>i.id)});
+assert.equal(timeline.cursors.length,6);
+assert.equal(timeline.events.length,48);
+assert.deepEqual(timeline.cursors.map(c=>c.at),[0,5,10,15,20,25]);
+assert.deepEqual(timeline.events.filter((_,i)=>i%8===0).map(e=>e.level),[.15,.3,.45,.6,.8,1]);
+const line=buildDiagramTimeline({kind:'line',items:[{id:'a',label:'느리게',tempo:60},{id:'b',label:'빠르게',tempo:120}],phrases:{all:'tune-a'}});
+assert.deepEqual(line.cursors.map(c=>c.end-c.at),[8,4]);
+const seq=buildDiagramTimeline({kind:'sequence',items:[{id:'a',label:'A'},{id:'b',label:'B'},{id:'c',label:'A'}],phrases:{A:'tune-a',B:'tune-b'}});
+assert.deepEqual(seq.events.slice(0,8).map(e=>e.midis),seq.events.slice(16).map(e=>e.midis));
+assert.throws(()=>buildDiagramTimeline({kind:'sequence',items:[{id:'a',label:'A'}]}),/가락/);
+console.log('직접 만든 가락·도식 순서·세기·빠르기 일정 시험 통과');

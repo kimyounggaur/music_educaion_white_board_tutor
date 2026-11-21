@@ -303,17 +303,28 @@ select {
   margin-top: 12px;
   min-height: 44px;
 }
-.feedback:has(> p:empty):not(:has(#errorNotice:not([hidden]))) {
-  display: none;
-}
 .feedback {
   flex: 1 0 100%;
   font-size: 13px;
+  line-height: 20px;
+  min-height: 20px;
 }
 .feedback p {
   margin: 0;
   color: var(--muted);
 }
+.topic-picker { max-width: 1180px; }
+.topic-grid { display:grid; grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) minmax(240px,1.4fr); gap:20px; }
+.topic-grid section { min-width:0; }
+.topic-card { padding:10px 0; border-bottom:1px solid var(--border,#ccc); }
+.topic-card button[aria-pressed=true] { outline:2px solid var(--accent,#26715e); outline-offset:2px; }
+.topic-card p { margin:6px 0; }
+.topic-field { display:flex; flex-direction:column; gap:6px; margin:14px 0; }
+.topic-field input[type=checkbox] { align-self:flex-start; width:24px; height:24px; }
+.topic-field select,.topic-field input { max-width:100%; min-height:44px; }
+.diagram-playhead { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:4; }
+.diagram-playhead[hidden] { display:none; }
+@media(max-width:760px) { .topic-grid { grid-template-columns:1fr; } }
 #errorNotice {
   display: flex;
   align-items: center;

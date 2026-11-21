@@ -1,0 +1,3 @@
+import { primary, definition, keyParam, labelsParam, practiceParam, select } from './definition.js';
+import { buildMinorScale, buildMinorScaleLesson, buildInterval, buildMinorTriads, buildCadence, buildPentatonic } from './secondary.js';
+export default definition('cadences', '여러 마침꼴', '두 화음으로 마침꼴을 듣고 비교해요.', '화음', '중1-3', [keyParam(false, true), select('kind', '마침꼴', [{ value: 'authentic', label: '바른마침' }, { value: 'plagal', label: '벗어난마침' }, { value: 'half', label: '반마침' }, { value: 'deceptive', label: '거짓마침' }], 'authentic'), { id: 'seventh', label: '딸림화음에 7음 넣기', type: 'boolean', default: false }], buildCadence);

@@ -27,8 +27,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: npm run build:rhythm-prototype
       - name: Check the published HTML matches the build
-        run: git diff --exit-code -- dist/index.html
+        run: git diff --exit-code -- dist/index.html prototypes/rhythm/index.html
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

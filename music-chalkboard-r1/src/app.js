@@ -11,6 +11,7 @@ import { openSceneList } from './ui/scene-list.js';
 import { confirmAction } from './ui/confirm-dialog.js';
 import { openDialog, makeButton, paragraph, checkbox } from './ui/dialog.js';
 import { fileActions, exportDialog, safeFilename, koreanDate, copyText } from './ui/file-export.js';
+import { openTopicPicker } from './ui/topic-picker.js';
 import { ScenePlayer } from './player.js';
 import { builtins } from './builtins.js';
 import { builtInLessons, builtInLessonScenes, builtInLessonReview } from './lessons/index.js';
@@ -39,6 +40,13 @@ let statusTimer;
 let fontAvailable = true;
 let soundEnabled = true;
 let pendingPractice = null;
+let navigating = false;
+
+function lessonPosition() {
+  const ids = sharedSession?.scenes.length > 1 ? sharedSession.scenes.map(doc => doc.id) : activeLesson?.sceneIds;
+  const index = ids?.indexOf(current?.id) ?? -1;
+  return { index, total: ids?.length || 0, previous: index > 0, next: index >= 0 && index < ids.length - 1 };
+}
 
 function status(message, { error = false, persistent = false } = {}) {
   clearTimeout(statusTimer);
@@ -65,12 +73,13 @@ function updatePlayback({ state, phase, completed, total, stepLabel, message, ca
   byId('playMode').value = player.mode;
   const step = stepLabel || current?.steps?.[Math.min(completed, total - 1)]?.label || '';
   const suffix = state === 'paused' ? ' · 일시정지' : phase === 'holding' ? ' · 대기' : '';
-  const progressText = completed + ' / ' + total + '단계' + (step ? ' · ' + step : '') + suffix;
+  const position = lessonPosition();
+  const progressText = (position.index >= 0 ? `${position.index + 1}/${position.total} · ` : '') + completed + ' / ' + total + '단계' + (step ? ' · ' + step : '') + suffix;
   if (byId('progress').textContent !== progressText) byId('progress').textContent = progressText;
-  byId('previousStep').disabled = completed === 0 && !['playing', 'paused'].includes(state);
-  byId('nextStep').disabled = state === 'completed';
-  byId('togglePlay').disabled = state === 'completed';
-  const label = state === 'playing' ? '일시정지' : state === 'paused' ? '계속' : '시작';
+  byId('previousStep').disabled = (player.atStart ?? completed === 0) && !position.previous && !['playing', 'paused'].includes(state);
+  byId('nextStep').disabled = state === 'completed' && !position.next;
+  byId('togglePlay').disabled = state === 'completed' && !position.next;
+  const label = state === 'completed' && position.next ? '다음 장면' : state === 'playing' ? '일시정지' : state === 'paused' ? '계속' : '시작';
   byId('togglePlay').textContent = label;
   byId('togglePlay').setAttribute('aria-label', label);
   byId('replay').disabled = !canReplay;
@@ -90,7 +99,7 @@ function completedPracticeCue(completed) {
 
 function boardText() {
   if (!current) return '';
-  const groups = (current.steps || []).slice(0, player.completed || 0).flatMap(step => step.groupIds);
+  const groups = [...new Set([...(player.carriedGroups || []), ...(current.steps || []).slice(0, player.completed || 0).flatMap(step => step.groupIds)])];
   const descriptions = player.scene?.descriptions || player.scene?.groupDescriptions;
   const text = [];
   for (const id of groups) {
@@ -133,14 +142,14 @@ async function sceneById(id) {
   return builtinScenes.find(scene => scene.id === id) || (storage ? storage.getScene(id) : null);
 }
 
-async function openDoc(doc, { rememberSelection = true } = {}) {
+async function openDoc(doc, { rememberSelection = true, ...playback } = {}) {
   if (!doc || doc.deletedAt) throw Error('열 수 있는 장면을 찾지 못했습니다.');
   const previous = current && { doc: current, snapshot: player.snapshot(), title: byId('sceneTitle').textContent };
   buildDocumentScene(doc, false);
   const candidate = structuredClone(doc);
   try {
     current = candidate;
-    player.open(candidate);
+    player.open(candidate, playback);
     byId('sceneTitle').textContent = candidate.title;
     byId('sceneTitle').title = candidate.title;
     byId('editScene').textContent = candidate.origin === 'builtin' ? '복제해서 편집' : '내용 편집';
@@ -156,7 +165,7 @@ async function openDoc(doc, { rememberSelection = true } = {}) {
   refreshNavigation();
 }
 
-async function selectScene(id, { orderedIds, lesson, rememberSelection = true } = {}) {
+async function selectScene(id, { orderedIds, lesson, rememberSelection = true, ...playback } = {}) {
   if (previewReturn) return;
   const request = ++sceneRequest;
   const doc = await sceneById(id);
@@ -166,7 +175,7 @@ async function selectScene(id, { orderedIds, lesson, rememberSelection = true } 
   try {
     if (orderedIds) searchOrder = [...orderedIds];
     if (lesson !== undefined) activeLesson = lesson;
-    await openDoc(doc, { rememberSelection });
+    await openDoc(doc, { rememberSelection, ...playback });
     if (request !== sceneRequest) return;
     if (lesson !== undefined) await remember('activeLessonId', lesson?.id || null);
     return true;
@@ -205,12 +214,13 @@ async function refreshNavigation() {
   } catch (error) { report(error); }
 }
 
-async function changeScene(delta) {
+async function changeScene(delta, { start = false, completed = false } = {}) {
+  const playback = { carryForward: delta > 0 && player.state === 'completed', start, completed, quiet: start || completed };
   if (sharedSession) {
     const next = sharedSession.index + delta;
     if (next < 0 || next >= sharedSession.scenes.length) return;
     const scene = sharedSession.scenes[next];
-    await openDoc(scene, { rememberSelection: false });
+    await openDoc(scene, { rememberSelection: false, ...playback });
     sharedSession.index = next;
     byId('sceneTitle').textContent = '공유 미리보기 · ' + scene.title;
     refreshNavigation();
@@ -230,7 +240,7 @@ async function changeScene(delta) {
     if (activeLesson && delta > 0) status('수업의 마지막 장면입니다.');
     return;
   }
-  await selectScene(ids[index + delta]);
+  await selectScene(ids[index + delta], playback);
 }
 
 function draftRecord(snapshot, baseRevision, isNew, draftId) {
@@ -307,6 +317,9 @@ async function editDoc(original, isNew = false, allowTemplateChange = false, rec
   openSceneEditor({
     scene: doc, isNew, allowTemplateChange, preserveInitialDraft: !!recoveredDraft, fontAvailable,
     getLayoutFeedback: checkDocumentLayout,
+    onRegenerate: snapshot => new Promise(resolve => {
+      createFromTopic({ source:snapshot.content.source, onResult:resolve });
+    }),
     onSave: async snapshot => {
       const feedback = layoutCheck(snapshot);
       if (!storage) throw Error('저장소를 사용할 수 없습니다. 초안 파일을 보관해 주세요.');
@@ -398,6 +411,7 @@ async function openList(query = '') {
     onEdit: scene => { setTimeout(() => editDoc(scene).catch(report), 0); },
     onClone: scene => { setTimeout(() => editDoc(cloneDoc(scene), true).catch(report), 0); },
     onNew: () => { setTimeout(() => editDoc(createSceneV2(), true, true).catch(report), 0); },
+    onTopic: () => { setTimeout(() => createFromTopic(), 0); },
     onDelete: async scene => {
       if (!storage) throw Error('저장소를 사용할 수 없습니다.');
       await storage.setDeleted(scene.id, scene.revision, true);
@@ -432,6 +446,41 @@ async function updateDraftCount({ announce = false } = {}) {
     byId('recoverDraft').textContent = '초안 복구' + (drafts.length ? ' (' + drafts.length + ')' : '');
     if (announce && drafts.length) status('복구할 초안이 ' + drafts.length + '개 있습니다. 장면 메뉴의 초안 복구에서 이어서 편집하세요.', { persistent: true });
   } catch { /* The storage status screen retains the error path. */ }
+}
+
+function createFromTopic({unit = 'scene', source, onResult} = {}) {
+  pauseForDialog();
+  return openTopicPicker({
+    unit, source, getLayoutFeedback:checkDocumentLayout, onClose:()=>{focusBoard();setTimeout(()=>onResult?.(false),0);},
+    onScene: doc => {
+      if (onResult) {
+        onResult(true);
+        setTimeout(()=>editDoc(doc,true,false).catch(report),0);
+        return;
+      }
+      const result = editDoc(doc, true, false);
+      status('주제 카드로 채웠습니다. 문구와 순서를 확인해 주세요.');
+      return result;
+    },
+    onLesson: async (result, view) => {
+      if (!result.lesson) throw Error('이 주제는 한 장면으로 만들 수 있습니다.');
+      if (!storage) {
+        view.content.replaceChildren(paragraph('저장소를 사용할 수 없습니다. 수업 파일을 보관해 주세요.'),
+          fileActions(makeScenePackage(result.scenes,{lessons:[result.lesson]}),safeFilename(result.lesson.title)+'.json'));
+        view.actions.querySelector('button').hidden = true;
+        return;
+      }
+      const saved = await storage.saveGeneratedLesson(result.scenes,result.lesson);
+      onResult?.(true);
+      view.content.replaceChildren(paragraph(saved.lesson.title + ' 수업을 만들었습니다 (' + saved.scenes.length + '장면).'),
+        makeButton('수업 열기',async()=>{
+          view.close();
+          await selectScene(saved.lesson.sceneIds[0],{lesson:saved.lesson,orderedIds:[]});
+        }));
+      view.actions.querySelector('button').hidden = true;
+      updateDraftCount();
+    },
+  });
 }
 
 async function recoverDraft() {
@@ -701,7 +750,7 @@ async function openLessonManager() {
       items.append(row);
     }
   }
-  view.actions.prepend(makeButton('새 수업', () => editLesson(null, refresh)));
+  view.actions.prepend(makeButton('새 수업', () => editLesson(null, refresh)), makeButton('주제로 수업 만들기',()=>{view.close();createFromTopic({unit:'lesson'});}));
   await refresh();
 }
 
@@ -787,7 +836,8 @@ function openPractice() {
   if (!plan) throw Error('현재 단계에 해보기 문제가 없습니다.');
   pauseForDialog();
   const view = openDialog('해보기 · 건반', { onClose: () => { player.stopAudio?.(); focusBoard(); } });
-  view.content.append(paragraph(cue.order === 'sequential' ? '칠판의 음을 차례대로 눌러 보세요.' : '칠판의 구성음을 찾아 눌러 보세요.'));
+  view.content.append(paragraph(cue.order === 'sequential' ? '칠판의 음을 차례대로 눌러 보세요.' : '칠판의 구성음을 찾아 눌러 보세요.'),
+    paragraph('다른 옥타브의 같은 음도 정답이에요. 건반 범위 ' + cue.keyboard.from + '부터 ' + cue.keyboard.to + '까지예요.'));
   const feedback = paragraph('');
   feedback.setAttribute('role', 'status');
   const keyboard = document.createElement('div');
@@ -823,10 +873,9 @@ function openPractice() {
   }
   view.content.append(keyboard, feedback);
   view.actions.prepend(makeButton('다시 시도', () => { progress = startPractice(plan); feedback.textContent = ''; keys[0]?.focus(); }),
-    makeButton(player.state === 'completed' ? (activeLesson ? '다음 장면' : '칠판으로 돌아가기') : '다음 단계', async () => {
+    makeButton(player.state === 'completed' ? (lessonPosition().next ? '다음 장면' : '칠판으로 돌아가기') : '다음 단계', async () => {
       view.close();
-      if (player.state !== 'completed') player.next();
-      else if (activeLesson) await changeScene(1);
+      if (player.state !== 'completed' || lessonPosition().next) await playbackCommand('next');
     }));
   keys[0]?.focus();
 }
@@ -851,11 +900,23 @@ function syncOptions() {
   byId('soundToggle').setAttribute('aria-pressed', String(soundEnabled));
 }
 
-function playbackCommand(command) {
+async function playbackCommand(command) {
   if (soundEnabled && (command === 'next' || (command === 'toggle' && player.state !== 'playing'))) {
     player.unlockFromGesture?.().then(ready => { if (!ready) status('소리를 재생하지 못했습니다. 다시 듣기에서 재시도할 수 있습니다.'); });
   }
   closeMenus();
+  const position = lessonPosition();
+  const forwards = ['next','toggle'].includes(command) && player.state === 'completed' && position.next;
+  const backwards = command === 'previous' && player.atStart && position.previous;
+  if (forwards || backwards) {
+    if (navigating) return;
+    navigating = true;
+    try {
+      byId('status').textContent = '';
+      await changeScene(forwards ? 1 : -1, { start: forwards, completed: backwards });
+    } finally { navigating = false; }
+    return;
+  }
   player[command]();
 }
 
@@ -868,6 +929,7 @@ function bind(id, action, { close = true } = {}) {
 }
 
 bind('openScenes', () => openList());
+bind('createFromTopic', () => createFromTopic());
 bind('newScene', () => editDoc(createSceneV2(), true, true));
 bind('duplicateScene', () => editDoc(cloneDoc(current), true));
 bind('editScene', () => current.origin === 'builtin' ? editDoc(cloneDoc(current), true) : editDoc(current));
@@ -992,13 +1054,13 @@ document.addEventListener('keydown', event => {
   }
   if (['ArrowRight', 'PageDown'].includes(event.key)) {
     event.preventDefault();
-    playbackCommand('next');
+    playbackCommand('next').catch(report);
   } else if (['ArrowLeft', 'PageUp'].includes(event.key)) {
     event.preventDefault();
-    playbackCommand('previous');
+    playbackCommand('previous').catch(report);
   } else if (event.key === ' ' && !event.target.closest('button,summary,a')) {
     event.preventDefault();
-    playbackCommand('toggle');
+    playbackCommand('toggle').catch(report);
   }
 });
 byId('stage').addEventListener('click', event => player.playAt?.(event.clientX, event.clientY));

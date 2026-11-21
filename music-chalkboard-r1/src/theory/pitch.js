@@ -15,7 +15,7 @@ export function parsePitch(text) {
 }
 
 export function accidentalText(acc) {
-  return acc === 1 ? '#' : acc === -1 ? 'b' : '';
+  return Number.isInteger(acc) && Math.abs(acc) <= 2 ? acc > 0 ? '#'.repeat(acc) : 'b'.repeat(-acc) : '';
 }
 
 export function pitchClassName(pitch) {

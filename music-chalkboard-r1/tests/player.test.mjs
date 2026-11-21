@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { createScene, createSceneV2, defaultSteps } from '../src/scene-model.js';
+import { activeGroups } from '../src/scene-model.js';
+import { builtInLessonScenes } from '../src/lessons/index.js';
+import { sourceLessons } from '../src/lessons/source-lessons.js';
+import { parsePitch } from '../src/theory/pitch.js';
+import { reusableGroups } from '../src/plan.js';
 
 const win = new Window({url:'http://localhost/'});
 const frames = new Map();
@@ -192,4 +197,201 @@ release(true);
 await ready;
 assert.equal(calls.length, 0, 'late unlock cannot fire a sound after closing its scene');
 
-console.log('판서 단계·화면 회전·접근성·화음 발음·해보기 대기 시험 통과');
+// Fake only the listening timers: animation remains controlled by tick().
+const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
+const timers = new Map();
+let timerId = 0;
+globalThis.setTimeout = (fn, delay) => { const id = ++timerId; timers.set(id, {fn, delay}); return id; };
+globalThis.clearTimeout = id => timers.delete(id);
+const flushSounds = () => {
+  while (timers.size) {
+    const [id, timer] = [...timers].sort((a,b) => a[1].delay - b[1].delay)[0];
+    timers.delete(id);
+    timer.fn();
+  }
+};
+engine.unlockFromGesture = () => Promise.resolve(true);
+try {
+  // Every source listening instruction gets its original ordered notes/chords,
+  // even if feedback or presentation settings cause an immediate redraw.
+  let sceneIndex = 0, listeningScenes = 0;
+  for (const lesson of sourceLessons) {
+    for (const instruction of lesson.steps) {
+      const doc = builtInLessonScenes[sceneIndex++];
+      if (!instruction.play) continue;
+      const plays = Array.isArray(instruction.play) ? instruction.play : [instruction.play];
+      const expected = plays.flatMap(play => {
+        const element = lesson.elements[play.target];
+        const pitches = (play.notes ?? element.pitches.map((_,index) => index + 1))
+          .map(ordinal => parsePitch(element.pitches[ordinal - 1]).midi);
+        return element.type === 'chord' ? [pitches] : pitches.map(midi => [midi]);
+      });
+      calls.length = 0;
+      player.open(doc);
+      player.next();
+      const epoch = player.audioEpoch;
+      player.resize({width:1366 + listeningScenes,height:768});
+      player.setOption('theme', listeningScenes % 2 ? 'chalk' : 'white');
+      player.setOption('speed', listeningScenes % 2 ? 'normal' : 'fast');
+      assert.equal(player.audioEpoch, epoch, 'presentation redraw must preserve scheduled audio');
+      flushSounds();
+      assert.deepEqual(calls.splice(0), expected, `${lesson.id}: ${instruction.caption}`);
+      listeningScenes++;
+    }
+  }
+  assert.ok(listeningScenes >= 14, 'all existing multi-target and single-target listening scenes are covered');
+
+  const sequence = createSceneV2('note-selection');
+  sequence.content.columns = ['C4','D4','E4'].map((pitch,index) => ({
+    id:`c${index}`,kind:'note',notes:[{id:`n${index}`,pitch}],labelMode:'none',highlightNoteIds:[],
+  }));
+  sequence.steps = [{id:'listen-three',label:'듣기',groupIds:activeGroups(sequence),advance:'manual',holdMs:0,
+    cue:{type:'listen',targets:sequence.content.columns.map(column => ({columnId:column.id}))}}];
+  calls.length = 0;
+  player.open(sequence);
+  player.next();
+  assert.deepEqual(calls, [[60]]);
+  player.resize({width:390,height:844});
+  player.setOption('method','canvas');
+  flushSounds();
+  assert.deepEqual(calls.splice(0), [[60],[62],[64]], 'resize does not cancel the remaining listening sequence');
+  player.replay();
+  player.resize({width:1024,height:768});
+  flushSounds();
+  assert.deepEqual(calls.splice(0), [[60],[62],[64]], 'manual replay also survives redraw');
+  for (const interrupt of [() => player.pause(), () => player.restart(), () => player.finish(),
+    () => player.open(scene), () => player.previewFrom(0), () => player.setAudioEnabled(false)]) {
+    player.setAudioEnabled(true);
+    player.open(sequence);
+    player.next();
+    assert.equal(timers.size, 2);
+    interrupt();
+    assert.equal(timers.size, 0, 'explicit navigation and pause cancel outstanding audio');
+    calls.length = 0;
+  }
+} finally {
+  player.stop();
+  globalThis.setTimeout = realSetTimeout;
+  globalThis.clearTimeout = realClearTimeout;
+}
+
+player.setAudioEnabled(true);
+player.setOption('method','svg');
+player.resize({width:1366,height:768});
+player.reduced = false;
+const beforeCarry = createSceneV2('note-selection');
+beforeCarry.caption = '첫 정리예요.';
+beforeCarry.steps = defaultSteps(beforeCarry);
+const afterCarry = structuredClone(beforeCarry);
+afterCarry.id += '-next';
+afterCarry.caption = '다음 정리예요.';
+afterCarry.steps = defaultSteps(afterCarry);
+player.open(beforeCarry);
+player.finish();
+const sharedCount = player.visibleNotes().length;
+calls.length = 0;
+player.open(afterCarry,{carryForward:true,start:true,quiet:true});
+assert.ok(player.startPosition >= 2, 'fully carried staff/note prefix is skipped');
+assert.equal(player.completed, player.startPosition);
+assert.equal(player.state, 'playing');
+assert.equal(player.visibleNotes().length, sharedCount);
+assert.ok(player.describeVisible().includes('음표'));
+assert.equal(calls.length, 0, 'carried notes have no new writing sound');
+assert.ok(player.plans.every(plan => plan.events.length === 0));
+const carrySnapshot = player.snapshot();
+player.previous();
+assert.equal(player.completed, player.startPosition);
+assert.equal(player.atStart, true);
+const carried = [...player.carriedGroups];
+player.previous();
+assert.equal(player.completed, player.startPosition, 'previous cannot descend below the carried prefix');
+player.resize({width:1920,height:1080});
+player.setOption('theme','chalk');
+assert.deepEqual([...player.carriedGroups],carried);
+assert.equal(player.visibleNotes().length, sharedCount);
+player.restore(carrySnapshot);
+assert.equal(player.visibleNotes().length, sharedCount, 'preview restoration retains carried ink');
+assert.deepEqual([...player.carriedGroups],carried);
+player.restart();
+assert.equal(player.startPosition,0);
+assert.equal(player.carriedGroups.size,0);
+assert.equal(player.visibleNotes().length,0);
+assert.equal(player.visibleGroups.size,0,'restart truly clears the board');
+player.open(beforeCarry,{completed:true,quiet:true});
+assert.equal(player.state,'completed');
+assert.equal(player.visibleNotes().length,sharedCount);
+assert.equal(calls.length,0,'backward completed opening is silent');
+
+const withActivity = structuredClone(afterCarry);
+withActivity.steps[0].cue = {type:'listen',targets:[{columnId:withActivity.content.columns[0].id}]};
+player.open(withActivity,{carryForward:true});
+assert.equal(player.startPosition,0,'a carried activity remains a real step');
+assert.ok(player.plans[0].listens.length,'carried notes are included in an explicit listen cue');
+const allShared = structuredClone(beforeCarry);
+player.open(beforeCarry,{completed:true,quiet:true});
+player.open(allShared,{carryForward:true});
+assert.equal(player.startPosition,allShared.steps.length - 1,'the final step is never skipped');
+player.open(beforeCarry,{completed:true,quiet:true});
+const differentSeed = {...afterCarry,renderSeed:afterCarry.renderSeed + 1};
+player.open(differentSeed,{carryForward:true});
+assert.equal(player.carriedGroups.has('staff'),false,'same group IDs are insufficient when strokes differ');
+player.open(beforeCarry,{completed:true,quiet:true});
+player.area = {width:390,height:844};
+player.open(afterCarry,{carryForward:true});
+assert.equal(player.carriedGroups.size,0,'different layout orientation cannot carry ink');
+
+const artwork = (point, ink = 'main') => ({portrait:false,groups:new Map([
+  ['same',[{type:'line',ink,role:'staff',strokes:[{width:2,pts:[[point,20],[50,20]]}]}]],
+  ['removed',[{type:'text',ink:'main',text:'옛 장면'}]],
+])});
+assert.deepEqual([...reusableGroups(artwork(10.01), artwork(10.04))],['same','removed']);
+assert.equal(reusableGroups(artwork(10.01),artwork(10.06)).has('same'),false);
+assert.equal(reusableGroups(artwork(10.01),artwork(10.01,'accent')).has('same'),false);
+player.stop();
+
+// Diagram examples use the same bounded audio clock while the writing renderer
+// remains silent. The cursor is transient and reprojects after a redraw.
+const diagram = createSceneV2('diagram');
+diagram.content.phrases = {A:'tune-a',B:'tune-b'};
+diagram.steps = defaultSteps(diagram);
+diagram.steps.push({id:'diagram-listen',label:'가락 듣기',groupIds:[],advance:'manual',holdMs:0,
+  cue:{type:'listen',items:diagram.content.items.map(item => item.id)}});
+engine.currentTime = 0;
+const timedCalls = [];
+engine.play = (midis,options) => timedCalls.push({midis,options});
+player.reduced = true;
+player.resize({width:1366,height:768});
+player.open(diagram);
+for (let i = 0; i < diagram.steps.length; i++) player.next();
+assert.equal(player.state,'completed');
+assert.equal(timedCalls.length,1,'only the first lookahead window is queued');
+assert.equal(player.timelineScheduler.active,true);
+engine.currentTime = .1;
+tick(16);
+assert.equal(player.timelineCursor.itemId,diagram.content.items[0].id);
+assert.equal(player.playhead.hasAttribute('hidden'),false);
+const scheduledStart = player.timelineScheduler.startTime;
+player.resize({width:390,height:844});
+player.setOption('theme','white');
+assert.equal(player.timelineScheduler.startTime,scheduledStart);
+assert.equal(timedCalls.length,1,'diagram re-layout adds no duplicate note');
+assert.equal(player.playheadBar.getAttribute('fill'),'#a85400');
+engine.currentTime = .6;
+tick(16);
+assert.equal(timedCalls.length,2);
+assert.ok(Math.abs(timedCalls[1].options.at - .65) < 1e-9,'diagram scheduling stays on the initial audio clock');
+assert.equal(player.diagramReplayTimeline().cursors.length,2);
+Object.defineProperty(document,'hidden',{value:true,configurable:true});
+tick(16);
+assert.equal(player.timelineScheduler.active,false);
+assert.equal(player.playhead.hasAttribute('hidden'),true);
+Object.defineProperty(document,'hidden',{value:false,configurable:true});
+tick(16);
+assert.equal(timedCalls.length,2,'returning to a visible tab does not resume the stopped tune');
+assert.equal(player.replay(),true);
+assert.equal(player.timelineScheduler.active,true);
+player.pause();
+assert.equal(player.timelineScheduler.active,false);
+player.stop();
+
+console.log('판서 단계·회전·듣기 예약·이어 쓰기·도식 가락·접근성·화음·해보기 대기 시험 통과');

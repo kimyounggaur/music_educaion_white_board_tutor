@@ -1,0 +1,3 @@
+import { primary, definition, keyParam, labelsParam, practiceParam, select } from './definition.js';
+import { buildMinorScale, buildMinorScaleLesson, buildInterval, buildMinorTriads, buildCadence, buildPentatonic } from './secondary.js';
+export default definition('interval', '음정', '조의 음계를 따라 음 사이의 거리를 세어요.', '음높이', '공통', [keyParam(), { id: 'fromPitch', label: '아래 음', type: 'pitch', default: 'C4' }, select('degree', '도수', Array.from({ length: 7 }, (_, i) => ({ value: i + 2, label: `${i + 2}도` })), 5), select('presentation', '보여 주는 방식', [{ value: 'sequential', label: '차례로' }, { value: 'simultaneous', label: '동시에' }], 'sequential')], buildInterval);

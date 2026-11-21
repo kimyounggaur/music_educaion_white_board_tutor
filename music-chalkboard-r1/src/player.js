@@ -1,5 +1,5 @@
 import { buildDocumentScene, metricsFor } from './scene.js';
-import { buildStepPlans, collectNoteHeads, segProgress, penAt } from './plan.js';
+import { buildStepPlans, collectNoteHeads, reusableGroups, segProgress, penAt } from './plan.js';
 import { SvgRenderer } from './render-svg.js';
 import { CanvasRenderer } from './render-canvas.js';
 import { HandLayer } from './hand.js';
@@ -7,6 +7,8 @@ import { Dust } from './dust.js';
 import { paintBoard } from './texture.js';
 import { clamp } from './util.js';
 import { BoardAudio } from './audio/engine.js';
+import { buildDiagramTimeline } from './rhythm/diagram-audio.js';
+import { createTimelineScheduler } from './rhythm/scheduler.js';
 
 const THEMES = {
   chalk: { style:'chalk', label:'칠판', ink:{ main:'#f3efe3', accent:'#ffd45e', dim:'#b9c7bc' } },
@@ -56,7 +58,23 @@ export class ScenePlayer {
     this.pendingSounds = [];
     this.visibleItems = new Set();
     this.visibleGroups = new Set();
+    this.carriedGroups = new Set();
+    this.startPosition = 0;
     this.noteHeads = [];
+    this.audioRaf = 0;
+    this.timelineCursor = null;
+    this.timelineScheduler = createTimelineScheduler(audio, {
+      onCursor:cursor => { this.timelineCursor = cursor; this.drawTimelineCursor(); },
+    });
+    this.playhead = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.playhead.setAttribute('class', 'diagram-playhead');
+    this.playhead.setAttribute('aria-hidden', 'true');
+    this.playhead.setAttribute('hidden', '');
+    this.playheadBar = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    this.playheadBar.setAttribute('height', '4');
+    this.playheadBar.setAttribute('rx', '2');
+    this.playhead.append(this.playheadBar);
+    this.stage.append(this.playhead);
     this.stage.setAttribute('role', 'img');
     this.ink.setAttribute('aria-hidden', 'true');
     const media = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -70,6 +88,7 @@ export class ScenePlayer {
   get immediate() { return this.reduced || this.opts.effects === 'off'; }
   get dustEnabled() { return !this.immediate && this.opts.effects === 'full' && this.opts.dust === 'on' && this.opts.theme === 'chalk'; }
   get audioStatus() { return this.audioEnabled ? this.audio.status : 'off'; }
+  get atStart() { return this.completed <= this.startPosition && this.phase !== 'drawing'; }
   get stepLabel() {
     let step = this.completed;
     if (this.state === 'waiting' || this.state === 'completed' || this.phase === 'holding') step--;
@@ -107,12 +126,14 @@ export class ScenePlayer {
     const visibleNotes = this.visibleNotes();
     this.onChange?.({
       state:this.state, phase:this.phase, completed:this.completed, total, stepLabel:this.stepLabel,
-      message, visibleNotes, canReplay:this.replayGroups(visibleNotes).length > 0, practiceCue:this.practiceCue,
+      message, visibleNotes, canReplay:this.doc?.templateId === 'diagram'
+        ? Boolean(this.diagramReplayTimeline()) : this.replayGroups(visibleNotes).length > 0, practiceCue:this.practiceCue,
       audioStatus:this.audioStatus,
+      startPosition:this.startPosition, carriedGroups:[...this.carriedGroups], atStart:this.atStart,
     });
   }
 
-  prepare(doc) {
+  prepare(doc, carriedGroups = this.carriedGroups) {
     const portrait = preferredPortrait(this.area, this.scene?.portrait);
     let scene = buildDocumentScene(doc, portrait);
     if (portrait && scene.layoutErrors?.length) {
@@ -120,20 +141,32 @@ export class ScenePlayer {
       if (!landscape.layoutErrors?.length) scene = landscape;
     }
     scene.templateId = doc.templateId;
-    return { scene, plans:buildStepPlans(scene, doc.steps, this.opts.speed), noteHeads:collectNoteHeads(scene) };
+    return { scene, plans:buildStepPlans(scene, doc.steps, this.opts.speed, carriedGroups), noteHeads:collectNoteHeads(scene) };
   }
 
-  open(doc) {
+  open(doc, {carryForward = false, completed = false, start = false, quiet = false} = {}) {
     const candidate = structuredClone(doc);
-    const prepared = this.prepare(candidate);
+    const prepared = this.prepare(candidate, new Set());
+    const carried = carryForward && this.state === 'completed'
+      ? reusableGroups(this.scene, prepared.scene, this.visibleGroups) : new Set();
+    prepared.plans = buildStepPlans(prepared.scene, candidate.steps, this.opts.speed, carried);
     this.doc = candidate;
-    this.completed = 0;
-    this.state = 'ready';
+    this.carriedGroups = carried;
+    this.startPosition = 0;
+    // Keep an activity and the final step reachable even when all ink is shared.
+    while (this.startPosition < candidate.steps.length - 1) {
+      const step = candidate.steps[this.startPosition];
+      if (step.cue || !step.groupIds.every(id => carried.has(id))) break;
+      this.startPosition++;
+    }
+    this.completed = completed ? candidate.steps.length : this.startPosition;
+    this.state = completed ? 'completed' : 'ready';
     this.phase = null;
     this.elapsed = 0;
     this.playedEvents.clear();
     this.rebuild(undefined, prepared);
-    this.notify('시작을 눌러 첫 단계를 판서하세요.');
+    if (start && !completed) this.begin();
+    else this.notify(quiet ? undefined : completed ? '장면 판서가 완료되었습니다.' : '시작을 눌러 첫 단계를 판서하세요.');
   }
 
   stopFrame() {
@@ -191,6 +224,53 @@ export class ScenePlayer {
     this.hand.configure({penKind:theme.style === 'chalk' ? 'chalk' : 'marker', mode:penOnly ? 'pen' : 'hand'});
     this.hand.resize(w, h);
     this.prevPen = null;
+    this.drawTimelineCursor();
+  }
+
+  drawTimelineCursor() {
+    const bounds = this.scene?.diagramItems?.find(item => item.id === this.timelineCursor?.itemId);
+    if (!bounds) { this.playhead?.setAttribute('hidden', ''); return; }
+    this.playhead.setAttribute('viewBox', `0 0 ${this.scene.W} ${this.scene.H}`);
+    this.playheadBar.setAttribute('x', String(bounds.x0));
+    this.playheadBar.setAttribute('y', String(bounds.y1 + 6));
+    this.playheadBar.setAttribute('width', String(bounds.x1 - bounds.x0));
+    this.playheadBar.setAttribute('fill', THEMES[this.opts.theme].ink.accent);
+    this.playhead.removeAttribute('hidden');
+  }
+
+  diagramReplayTimeline() {
+    if (this.doc?.templateId !== 'diagram') return null;
+    const shown = new Set((this.doc.content.items ?? []).filter(item => this.visibleGroups.has(`box/${item.id}`)).map(item => item.id));
+    if (!shown.size) return null;
+    let items;
+    for (let i = Math.min(this.completed - 1, this.doc.steps.length - 1); i >= 0; i--) {
+      const cue = this.doc.steps[i].cue;
+      if (cue?.type === 'listen' && cue.items) { items = cue.items.filter(id => shown.has(id)); break; }
+    }
+    items ??= [...shown];
+    if (!items.length) return null;
+    try { return buildDiagramTimeline(this.doc, {items}); }
+    catch { return null; }
+  }
+
+  startTimeline(timeline) {
+    this.timelineScheduler.start(timeline);
+    if (this.phase === 'holding') this.holdRemaining = Math.max(this.holdRemaining || 0, timeline.duration * 1000 + 25);
+    const loop = () => {
+      this.audioRaf = 0;
+      if (document.hidden || !this.audioEnabled) { this.stopAudio(); return; }
+      this.timelineScheduler.tick();
+      if (this.timelineScheduler.active) this.audioRaf = requestAnimationFrame(loop);
+    };
+    this.audioRaf = requestAnimationFrame(loop);
+  }
+
+  scheduleTimeline(timeline) {
+    if (!this.audioEnabled || document.hidden) return 0;
+    if (this.audioStatus === 'ready') this.startTimeline(timeline);
+    else if (this.unlocking) this.pendingTimeline = {timeline, epoch:this.audioEpoch, requestedAt:performance.now()};
+    else return 0;
+    return timeline.duration * 1000 + 25;
   }
 
   fullPlan(plan) {
@@ -207,12 +287,22 @@ export class ScenePlayer {
     }
   }
 
-  rebuild(partial, prepared = this.prepare(this.doc)) {
-    this.stop();
+  rebuild(partial, prepared = this.prepare(this.doc), {preserveAudio = false} = {}) {
+    this.stopFrame();
+    this.clearDust();
+    if (!preserveAudio) this.stopAudio();
     this.setup(prepared);
     this.visibleItems.clear();
     this.visibleGroups.clear();
     this.groupRemaining = new Map([...this.scene.groups].map(([id, items]) => [id, items.length]));
+    for (const group of this.carriedGroups) {
+      for (const item of this.scene.groups.get(group) ?? []) {
+        const parts = item.type === 'text' ? 1 : item.strokes.length;
+        for (let si = 0; si < parts; si++) this.renderer.setPart({item, si}, 1);
+        this.renderer.completeItem(item);
+        this.revealItem(item);
+      }
+    }
     for (let i = 0; i < this.completed; i++) this.fullPlan(this.plans[i]);
     this.cursor = 0;
     this.itemLeft = new Map(this.scene.items.map(item => [item.index, item.type === 'text' ? 1 : item.strokes.length]));
@@ -330,7 +420,9 @@ export class ScenePlayer {
     this.completed++;
     this.stopFrame();
     this.drainDust();
-    const listenDuration = listen ? this.scheduleSounds(plan.listens.map(notes => notes.map(note => note.midi))) : 0;
+    const listenDuration = !listen ? 0 : this.doc.templateId === 'diagram' && step.cue?.type === 'listen'
+      ? this.scheduleTimeline(buildDiagramTimeline(this.doc, step.cue))
+      : this.scheduleSounds(plan.listens.map(notes => notes.map(note => note.midi)));
     if (this.completed >= this.plans.length) {
       this.state = 'completed';
       this.phase = null;
@@ -368,9 +460,10 @@ export class ScenePlayer {
   }
 
   previous() {
-    if (!this.doc || (this.completed === 0 && this.phase !== 'drawing')) return;
+    if (!this.doc || (this.completed <= this.startPosition && this.phase !== 'drawing')) return;
     if (this.phase !== 'drawing') this.completed--;
-    this.state = this.completed ? 'waiting' : 'ready';
+    this.completed = Math.max(this.startPosition, this.completed);
+    this.state = this.completed > this.startPosition ? 'waiting' : 'ready';
     this.phase = null;
     this.elapsed = 0;
     this.playedEvents.clear();
@@ -409,6 +502,8 @@ export class ScenePlayer {
 
   restart() {
     if (!this.doc) return;
+    this.carriedGroups.clear();
+    this.startPosition = 0;
     this.completed = 0;
     this.elapsed = 0;
     this.state = 'ready';
@@ -432,12 +527,17 @@ export class ScenePlayer {
       doc:structuredClone(this.doc), completed:this.completed, state:this.state, phase:this.phase,
       elapsed:this.elapsed, holdRemaining:this.holdRemaining, mode:this.mode,
       location:this.phase === 'drawing' ? this.location() : null, playedEvents:[...this.playedEvents],
+      carriedGroups:[...this.carriedGroups], startPosition:this.startPosition,
     };
   }
 
   restore(snapshot) {
     if (!snapshot.doc) return;
-    const doc = structuredClone(snapshot.doc), prepared = this.prepare(doc);
+    const doc = structuredClone(snapshot.doc);
+    const carried = new Set(snapshot.carriedGroups ?? []);
+    const prepared = this.prepare(doc, carried);
+    this.carriedGroups = carried;
+    this.startPosition = snapshot.startPosition ?? 0;
     this.doc = doc;
     this.completed = snapshot.completed;
     this.state = snapshot.state === 'playing' ? 'paused' : snapshot.state;
@@ -453,7 +553,7 @@ export class ScenePlayer {
 
   previewFrom(index) {
     if (!this.doc) return;
-    this.completed = Math.max(0, Math.min(index, this.doc.steps.length - 1));
+    this.completed = Math.max(this.startPosition, Math.min(index, this.doc.steps.length - 1));
     this.state = this.completed ? 'waiting' : 'ready';
     this.phase = null;
     this.elapsed = 0;
@@ -511,7 +611,8 @@ export class ScenePlayer {
   reconfigure() {
     if (!this.doc) return;
     const location = this.phase === 'drawing' ? this.location() : null;
-    this.rebuild();
+    this.rebuild(undefined, undefined, {preserveAudio:true});
+    if (document.hidden) this.stopAudio();
     if (this.phase === 'drawing') this.seekLocation(location);
     if (this.state === 'playing') {
       if (document.hidden) this.state = 'paused';
@@ -554,10 +655,15 @@ export class ScenePlayer {
       this.unlocking = null;
       const queued = this.pendingSounds;
       this.pendingSounds = [];
+      const pendingTimeline = this.pendingTimeline;
+      this.pendingTimeline = null;
       if (ready && this.audioEnabled && !document.hidden) {
         const now = performance.now();
         for (const sound of queued) {
           if (sound.epoch === this.audioEpoch && now - sound.requestedAt <= UNLOCK_REPLAY_WINDOW) this.audio.play(sound.midis);
+        }
+        if (pendingTimeline?.epoch === this.audioEpoch && now - pendingTimeline.requestedAt <= UNLOCK_REPLAY_WINDOW) {
+          this.startTimeline(pendingTimeline.timeline);
         }
       }
       if (previous !== this.audioStatus) this.notify();
@@ -578,7 +684,12 @@ export class ScenePlayer {
     for (const timer of this.audioTimers) clearTimeout(timer);
     this.audioTimers.clear();
     this.pendingSounds = [];
-    this.audio.stop();
+    this.pendingTimeline = null;
+    cancelAnimationFrame(this.audioRaf);
+    this.audioRaf = 0;
+    const timelineWasActive = this.timelineScheduler.active;
+    this.timelineScheduler.stop();
+    if (!timelineWasActive) this.audio.stop();
   }
 
   sound(midis) {
@@ -646,6 +757,13 @@ export class ScenePlayer {
     if (!this.audioEnabled) {
       this.notify('판서 메뉴에서 소리를 켜 주세요.');
       return false;
+    }
+    if (this.doc?.templateId === 'diagram') {
+      const timeline = this.diagramReplayTimeline();
+      if (!timeline) return false;
+      this.stopAudio();
+      void this.unlockFromGesture();
+      return this.scheduleTimeline(timeline) > 0;
     }
     const groups = this.replayGroups();
     if (!groups.length) return false;

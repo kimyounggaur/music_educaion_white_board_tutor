@@ -326,3 +326,10 @@
 
 .scene-editor fieldset { min-inline-size: 0; margin-inline: 0; }
 .scene-editor .ed-note-row select { min-width: 0; }
+.scene-editor .ed-cue { border-top: 1px solid #d8e6db; margin-top: 12px; }
+.scene-editor .ed-cue-targets { border: 1px solid #d8e6db; border-radius: 8px; padding: 8px 12px; }
+.scene-editor .ed-cue-targets label { display: flex; gap: 7px; align-items: center; min-height: 38px; margin: 0; }
+.scene-editor .ed-cue-targets input { flex: 0 0 auto; }
+.scene-editor .ed-activity-summary { white-space: pre-wrap; font-size: .85rem; overflow-wrap: anywhere; }
+.scene-editor .ed-source-notice { padding: 8px 12px; border-radius: 8px; background: #edf4ed; }
+.scene-editor .ed-interval-section { margin-top: 12px; }

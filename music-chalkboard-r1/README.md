@@ -1,4 +1,4 @@
-# 음악 칠판 튜터 3.0
+# 음악 칠판 튜터 3.1 후보 버전
 
 `src/app.js`가 헤더·미리보기·저장과 수업을 연결하고, 장면 모델·배치·재생·저장소는 각각 독립된 모듈에서 동작합니다.
 
@@ -11,6 +11,8 @@
 | 단계·소리 | player.js, plan.js, audio/engine.js |
 | 파일·저장·공유 | scene-storage.js, backup-chunks.js, import-settings.js, share-link.js |
 | 수업·활동 | lessons/, practice.js |
+| 주제 카드·출처·추천 링크 | cards/, ui/topic-picker.js |
+| 박 시계·직접 만든 도식 가락 | rhythm/, theory/rhythm.js |
 
 Node 24.x에서 `npm ci`, `npm test`, `npm run build`를 실행합니다. `npm run dev`는 기본 포트 4173에서 dist를 제공합니다. 실제 브라우저 시험은 `npm run test:e2e`입니다.
 
@@ -21,3 +23,5 @@ Node 24.x에서 `npm ci`, `npm test`, `npm run build`를 실행합니다. `npm r
 배포용 단일 HTML은 Gaegu 글꼴과 OFL 전문을 포함하며 CSS·JS 해시를 사용하는 CSP를 생성합니다. 빌드 재현성 검사에 맞춰 dist/index.html을 계속 추적합니다. 소스·배포 파일을 함께 커밋합니다.
 
 브라우저별 실제 저장 유지 승인, iPhone Safari의 첫 소리 재생과 파일 공유, 교실 전자칠판의 터치·가독성·프레임은 실기기 검수 기록을 별도로 남깁니다.
+
+리듬의 별도 시제품은 `npm run build:rhythm-prototype`으로 빌드합니다. [합격 조건](prototypes/rhythm/README.md)의 일곱 조건과 실기기 청취를 확인한 다음 리듬 자료형·편집·카드를 본편에 통합합니다. 국악은 교사·기준 자료·도식 부품·음향 방침을 확보한 뒤 상세 설계를 진행합니다.
