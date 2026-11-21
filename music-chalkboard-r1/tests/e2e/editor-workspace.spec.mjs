@@ -63,6 +63,13 @@ test('adjusts pitches and wait time with the keyboard, saves, and restores them'
   await hold.press('Home');await hold.press('ArrowRight');
   await expect(hold).toHaveValue('100');
   await expect(hold).toHaveAttribute('aria-valuetext','0.1초');
+  // A theory warning occupies body space without hiding either scrollable workspace.
+  await expect(editor.locator('.ed-warnings')).toBeVisible();
+  const footer=await editor.locator('footer').boundingBox();
+  for(const selector of ['.ed-stage-section','.ed-review-panel']){
+    const area=await editor.locator(selector).boundingBox();
+    expect(area.y+area.height).toBeLessThanOrEqual(footer.y+1);
+  }
   await page.screenshot({path:testInfo.outputPath('editor-desktop-steps.png')});
   await editor.getByRole('button',{name:'장면 저장',exact:true}).click();
   await expect(editor).toBeHidden();

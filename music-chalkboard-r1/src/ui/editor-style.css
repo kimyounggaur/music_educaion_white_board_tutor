@@ -54,16 +54,19 @@
   margin: 6px 0;
 }
 .scene-editor .ed-body {
+  display: flex;
+  flex-direction: column;
   padding: 16px;
   overflow: hidden;
   flex: 1;
   overscroll-behavior: contain;
 }
+.scene-editor .ed-body > :not(.ed-grid) { flex-shrink:0; max-height:30%; overflow:auto; }
 .scene-editor .ed-grid {
   display: grid;
   grid-template-columns: clamp(248px,21vw,320px) minmax(340px,1fr) minmax(320px,.9fr);
   gap: 16px;
-  height: 100%;
+  flex: 1;
   min-height: 0;
 }
 .scene-editor .ed-main {
@@ -251,6 +254,7 @@
     max-height: 100dvh;
   }
   .scene-editor .ed-body {
+    display: block;
     padding: 12px;
     overflow: auto;
   }
