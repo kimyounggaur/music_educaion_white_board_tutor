@@ -717,3 +717,64 @@ select {
 .board-transcript {
   white-space: pre-wrap;
 }
+
+/* Illustrated guide is a temporary workspace; the writing board stays primary. */
+.rulebook-open { white-space:nowrap; }
+.rulebook-dialog {
+  width:min(1320px,calc(100vw - 24px));
+  max-width:none;
+  max-height:calc(100dvh - 24px);
+  height:min(900px,calc(100dvh - 24px));
+  padding:0;
+  border:0;
+  border-radius:18px;
+  background:#f5f8f4;
+  box-shadow:0 18px 60px #0005;
+  overflow:hidden;
+}
+.rulebook-dialog::backdrop { background:#10241dcc; }
+.rulebook-dialog[open] { display:flex; flex-direction:column; }
+.rulebook-dialog > h2 { margin:0; padding:16px 24px 0; background:white; font-size:20px; }
+.rulebook-dialog > div:not(.dialog-actions) { min-height:0; }
+.rulebook-dialog > h2 + div { display:flex; flex:1; flex-direction:column; overflow:hidden; }
+.rulebook-dialog .dialog-error { margin:0; }
+.rulebook-dialog .dialog-actions { flex-shrink:0; margin:0; padding:10px 22px; background:white; border-top:1px solid #dce6dd; }
+.rulebook-dialog button { cursor:pointer; border:1px solid #b9cbbc; border-radius:8px; background:white; color:#204a36; font:inherit; }
+.rulebook-intro { padding:0 24px 12px; margin:0; background:white; color:#586e61; font-size:14px; }
+.rulebook-search-row { flex-shrink:0; padding:10px 24px; background:white; border-block:1px solid #e1e9e1; }
+.rulebook-search-row > label { display:block; font-weight:700; font-size:13px; margin-bottom:4px; }
+.rulebook-search-row > div { display:flex; gap:8px; }
+.rulebook-search-row input { flex:1; min-width:0; min-height:44px; border:1px solid #b9cbbc; border-radius:8px; padding:8px 12px; font:inherit; }
+.rulebook-search-row button { padding:7px 12px; }
+.rulebook-result { margin:4px 0 0; font-size:13px; color:#4b6455; }
+.rulebook-result:empty { display:none; }
+.rulebook-layout { display:grid; grid-template-columns:210px minmax(0,1fr); flex:1; min-height:0; }
+.rulebook-nav { overflow:auto; padding:14px; border-right:1px solid #dce6dd; background:#eff5ef; }
+.rulebook-nav button { display:block; width:100%; text-align:left; padding:7px 10px; margin-bottom:6px; border-color:transparent; background:transparent; font-size:14px; }
+.rulebook-nav button:hover,.rulebook-nav button:focus-visible { background:#dbeadf; }
+.rulebook-list { overflow:auto; overscroll-behavior:contain; padding:18px; display:grid; align-content:start; gap:16px; }
+.rulebook-card { display:grid; grid-template-columns:minmax(220px,35%) minmax(0,1fr); gap:22px; background:white; border:1px solid #dbe7dd; border-radius:14px; padding:18px; scroll-margin:12px; }
+.rulebook-card h3 { margin:0; color:#174c36; font-size:19px; scroll-margin:12px; }
+.rulebook-lead { color:#4a6655; margin:4px 0 10px; }
+.rulebook-card ol { padding-left:1.4em; margin:8px 0; }
+.rulebook-card li { padding-left:3px; margin:6px 0; }
+.rulebook-tip { background:#eef7ed; border-radius:9px; padding:9px 12px; margin:12px 0 0; font-size:14px; color:#315c3d; }
+.rulebook-tip::before { content:'수업 도움말 · '; font-weight:700; }
+.rulebook-figure { align-self:start; margin:0; border-radius:11px; overflow:hidden; background:#eaf3ea; }
+.rulebook-figure svg { display:block; width:100%; height:auto; }
+.rulebook-close { padding:8px 22px; min-height:44px; background:#28684e!important; color:white!important; }
+@media(max-width:700px) {
+  .header-nav > .rulebook-open { order:2; padding-inline:8px; min-width:0; font-size:13px; }
+  .rulebook-dialog { width:100vw; height:100dvh; max-height:100dvh; margin:0; border-radius:0; }
+  .rulebook-dialog > h2 { padding:12px 14px 0; }
+  .rulebook-intro { padding:0 14px 8px; }
+  .rulebook-search-row { padding:7px 14px; }
+  .rulebook-search-row button { font-size:12px; padding:5px 8px; }
+  .rulebook-layout { display:flex; flex-direction:column; }
+  .rulebook-nav { flex-shrink:0; display:flex; gap:5px; overflow-x:auto; padding:7px 10px; border:0; border-bottom:1px solid #dce6dd; }
+  .rulebook-nav button { flex:0 0 auto; width:auto; white-space:nowrap; margin:0; padding:5px 9px; border-color:#cfdfd2; background:white; }
+  .rulebook-list { padding:12px; }
+  .rulebook-card { grid-template-columns:1fr; gap:12px; padding:14px; }
+  .rulebook-figure { width:100%; max-width:500px; margin-inline:auto; }
+  .rulebook-dialog .dialog-actions { padding:6px 14px max(8px,env(safe-area-inset-bottom)); }
+}
