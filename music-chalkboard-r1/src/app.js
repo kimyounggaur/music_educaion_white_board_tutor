@@ -12,6 +12,7 @@ import { confirmAction } from './ui/confirm-dialog.js';
 import { openDialog, makeButton, paragraph, checkbox } from './ui/dialog.js';
 import { fileActions, exportDialog, safeFilename, koreanDate, copyText } from './ui/file-export.js';
 import { openTopicPicker } from './ui/topic-picker.js';
+import { openRulebook } from './ui/rulebook.js';
 import { ScenePlayer } from './player.js';
 import { builtins } from './builtins.js';
 import { builtInLessons, builtInLessonScenes, builtInLessonReview } from './lessons/index.js';
@@ -929,6 +930,7 @@ function bind(id, action, { close = true } = {}) {
 }
 
 bind('openScenes', () => openList());
+bind('openRulebook', () => { pauseForDialog(); openRulebook(); });
 bind('createFromTopic', () => createFromTopic());
 bind('newScene', () => editDoc(createSceneV2(), true, true));
 bind('duplicateScene', () => editDoc(cloneDoc(current), true));
