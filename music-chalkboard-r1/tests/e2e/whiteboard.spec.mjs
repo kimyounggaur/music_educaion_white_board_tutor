@@ -340,7 +340,7 @@ test('opens a restored lesson and judges an ordered piano exercise', async ({ pa
   await expect(page.locator('#sceneTitle')).toHaveText('다장조 음계 · 6단계');
 });
 
-test('checks WCAG A and AA accessibility across seven whiteboard states', async ({ page }) => {
+test('checks WCAG A and AA accessibility across eight whiteboard states', async ({ page }) => {
   test.setTimeout(60_000);
   await openBoard(page);
   const resolve = createRequire(import.meta.url).resolve;
@@ -370,6 +370,12 @@ test('checks WCAG A and AA accessibility across seven whiteboard states', async 
   await openMenu(page, 'sceneMenu');
   await expect(page.locator('#sceneSearch')).toBeVisible();
   await audit('장면 메뉴');
+  await page.locator('#createFromTopic').click();
+  const picker=page.getByRole('dialog',{name:'주제로 만들기'});
+  await expect(picker).toBeVisible();
+  await audit('주제 카드 선택창');
+  await picker.getByRole('button',{name:'닫기',exact:true}).click();
+  await expect(picker).toBeHidden();
   const editor = await openEditor(page);
   await expect(editor.locator('#ed-title')).toBeFocused();
   await audit('새 장면 편집기');
