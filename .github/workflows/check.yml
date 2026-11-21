@@ -33,7 +33,7 @@ jobs:
       - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: failure()
+        if: always()
         with:
           name: browser-test-diagnostics
           path: music-chalkboard-r1/test-results/

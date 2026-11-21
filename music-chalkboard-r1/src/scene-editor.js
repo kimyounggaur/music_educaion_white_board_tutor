@@ -9,6 +9,7 @@ import { describeInterval } from './theory/interval.js';
 import { describeDiatonicChord } from './theory/chord.js';
 import { MAJOR_KEY_TONICS, MINOR_KEY_TONICS } from './theory/scale.js';
 import { confirmAction } from './ui/confirm-dialog.js';
+import { renderEditorPreview } from './ui/editor-preview.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, character => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]
@@ -45,6 +46,8 @@ const pathAttr = (path, label) => `data-path="${esc(path)}" data-field-label="${
 const track = value => `data-focus-key="${esc(value)}"`;
 const actionId = (action, id) => `data-id="${esc(id)}" ${track(`${action}/${id}`)}`;
 const pitchText = (pitch, key) => formatNoteLabel(pitch, 'fixed-do', key) || pitch;
+const secondsText = value => `${(Number(value) / 1000).toFixed(1)}초`;
+const slider = (kind, value, min, max, step, attrs = '') => `<div class="ed-range" data-range-kind="${kind}"><input type="range" min="${min}" max="${max}" step="${step}" value="${esc(value)}" ${attrs}><div class="ed-range-scale"><span>${kind === 'hold' ? '바로 진행' : kind === 'level' ? '여리게' : kind === 'tempo' ? '느리게' : '낮게'}</span><output data-range-value aria-hidden="true"></output><span>${kind === 'hold' ? '10초' : kind === 'level' ? '세게' : kind === 'tempo' ? '빠르게' : '높게'}</span></div></div>`;
 function pitchOptions(selected, extended = false) {
   const allowed = naturalPitches.slice(0, extended ? 19 : 15);
   const values = allowed.map(pitch => [pitch, `${pitchText(pitch)} (${pitch})`]);
@@ -83,9 +86,11 @@ function notationControls(content) {
       ${[['major', MAJOR_KEY_TONICS, '장조'], ['minor', MINOR_KEY_TONICS, '단조']].map(([mode, tonics, label]) => `<optgroup label="${label}">${optionsHtml(tonics.map(tonic => [`${tonic}:${mode}`, keyNameKo(tonic, mode)]), `${key.tonic}:${key.mode}`)}</optgroup>`).join('')}
     </select>
     <p class="ed-muted">음과 변화음을 실제 연주할 높이로 선택하세요. 조표를 바꿔도 선택한 음은 유지됩니다.</p>
+    <details class="ed-notation-options"><summary>표시 옵션 <span class="ed-optional">음계·간격·조표</span></summary>
     <label>음계 종류 <select data-field="scaleType" ${pathAttr('content.scaleType', '음계 종류')}>${optionsHtml([['', '조의 기본 음계'], ['natural', '자연단음계'], ['harmonic', '화성단음계'], ['melodic', '가락단음계']], content.scaleType || '')}</select></label>
     <label><input type="checkbox" data-field="showGaps" ${checked(content.showGaps)}> 이웃한 음 사이에 온음·반음 표시</label>
     <label><input type="checkbox" data-field="splitSignature" ${checked(content.splitSignature)}> 조표를 한 개씩 단계로 나누기</label>
+    </details><p class="ed-controls-help">슬라이더로 음 높이를 움직이거나 음 목록에서 정확한 음을 고르세요.</p>
     <div class="ed-list">${columns.map(notationColumn).join('')}</div>
     <div class="ed-inline">
       ${command('column-add-note', '음표 열 추가', disabled(columns.length >= MAX_NOTATION_COLUMNS))}
@@ -118,12 +123,13 @@ function notationColumn(column, index, columns) {
       ${column.notes.map((note, noteIndex) => {
         const pitch = parsePitch(note.pitch);
         const noteLabel = `${index + 1}열 ${noteIndex + 1}번째 음`;
-        return `<div class="ed-inline ed-note-row">
+        return `<div class="ed-inline ed-note-row" data-note-row="${esc(note.id)}">
           <label><span>${noteLabel}</span>
             <select data-note="${esc(note.id)}" ${track(`pitch/${note.id}`)} ${pathAttr(`${base}.notes.${noteIndex}.pitch`, noteLabel)}>
               ${pitchOptions(pitch && pitch.letter + pitch.octave, true)}
             </select>
           </label>
+          ${slider('pitch',Math.max(0,naturalPitches.indexOf(pitch && pitch.letter+pitch.octave)),0,18,1,`data-pitch-slider="${esc(note.id)}" ${track(`pitch-slider/${note.id}`)} aria-label="${noteLabel} 음 높이"`)}
           <label><span>변화음</span>
             <select data-accidental="${esc(note.id)}" ${track(`accidental/${note.id}`)}
               aria-label="${noteLabel} 변화음">${optionsHtml(Object.entries(accidentalLabels), accidentalText(pitch?.acc))}</select>
@@ -216,8 +222,8 @@ function diagramControls(content) {
       <label>글자 <input data-diagram-text="label" data-id="${esc(item.id)}" ${pathAttr(`content.items.${index}.label`, `${index + 1}번째 글자`)} value="${esc(item.label)}"></label>
       <label>아래 글자 <input data-diagram-text="sub" data-id="${esc(item.id)}" ${pathAttr(`content.items.${index}.sub`, `${index + 1}번째 아래 글자`)} value="${esc(item.sub)}"></label>
       <label>색 <select data-diagram-value="ink" data-id="${esc(item.id)}">${optionsHtml([['main', '기본색'], ['accent', '강조색']], item.ink)}</select></label>
-      ${content.kind === 'ladder' ? `<label>세기 <input type="number" min="0.1" max="1" step="0.05" data-diagram-text="level" data-id="${esc(item.id)}" value="${esc(item.level ?? 0.6)}" ${pathAttr(`content.items.${index}.level`, '듣기 세기')}></label>` : ''}
-      ${content.kind === 'line' ? `<label>빠르기 (BPM) <input type="number" min="40" max="200" step="1" data-diagram-text="tempo" data-id="${esc(item.id)}" value="${esc(item.tempo ?? 96)}" ${pathAttr(`content.items.${index}.tempo`, '듣기 빠르기')}></label>` : ''}
+      ${content.kind === 'ladder' ? `<label>${index + 1}번째 세기</label>${slider('level',item.level ?? .6,.1,1,.05,`data-diagram-text="level" data-id="${esc(item.id)}" aria-label="${index + 1}번째 세기" ${pathAttr(`content.items.${index}.level`, '듣기 세기')}`)}` : ''}
+      ${content.kind === 'line' ? `<label>${index + 1}번째 빠르기</label>${slider('tempo',item.tempo ?? 96,40,200,1,`data-diagram-text="tempo" data-id="${esc(item.id)}" aria-label="${index + 1}번째 빠르기" ${pathAttr(`content.items.${index}.tempo`, '듣기 빠르기')}`)}` : ''}
       <div class="ed-inline">${moveButtons('diagram', item, index, items.length, 2, `${index + 1}번째 항목`)}</div>
     </fieldset>`).join('')}</div>
     ${command('diagram-add', '항목 추가', disabled(content.items.length >= 7))}
@@ -342,10 +348,9 @@ function stepsMarkup(draft, labels) {
         <label>단계 종료 후 <select data-advance="${esc(step.id)}" ${track(`advance/${step.id}`)}>
           ${optionsHtml([['manual', '기다리기'], ['auto', '자동 진행']], step.advance)}
         </select></label>
-        <label data-hold-row ${step.advance !== 'auto' ? 'hidden' : ''}>대기 시간 (ms)
-          <input type="number" min="0" max="10000" step="100" data-hold="${esc(step.id)}"
-            ${pathAttr(`steps.${index}.holdMs`, `${index + 1}단계 대기 시간`)} value="${esc(step.holdMs)}">
-        </label>
+        <div class="ed-hold" data-hold-row ${step.advance !== 'auto' ? 'hidden' : ''}><label>${index + 1}단계 대기 시간</label>
+          ${slider('hold',step.holdMs,0,10000,100,`data-hold="${esc(step.id)}" aria-label="${index + 1}단계 대기 시간" ${pathAttr(`steps.${index}.holdMs`, `${index + 1}단계 대기 시간`)}`)}
+        </div>
       </div>
       ${cueMarkup(draft, step, index)}
     </div>`;
@@ -355,16 +360,17 @@ function stepsMarkup(draft, labels) {
 function editorMarkup(isNew, allowTemplateChange, onExportDraft) {
   return `<div class="ed-shell">
     <header>
-      <div><h2>${isNew ? '새 장면' : '장면 편집'}</h2><span class="ed-muted" data-template-status></span></div>
+      <div class="ed-heading"><span class="ed-app-label">음악 칠판 · 장면 만들기</span><h2>${isNew ? '새 장면' : '장면 편집'}</h2><span class="ed-muted" data-template-status></span></div>
       <div class="ed-inline">
         ${onExportDraft ? `<details class="ed-extra"><summary>더 보기</summary>${command('export-draft', '초안 파일 내보내기')}</details>` : ''}
         ${command('close', '닫기')}
       </div>
     </header>
     <nav class="ed-tabs" aria-label="편집 화면">
-      <button type="button" data-tab="content">내용</button>
-      <button type="button" data-tab="steps">순서</button>
-      <button type="button" data-tab="review">확인</button>
+      <button type="button" data-tab="content"><span aria-hidden="true">1</span> 장면 내용</button>
+      <button type="button" data-tab="steps"><span aria-hidden="true">2</span> 판서 순서</button>
+      <button type="button" data-tab="review"><span aria-hidden="true">3</span> 미리보기·확인</button>
+      <span class="ed-nav-hint">입력한 내용은 오른쪽 칠판에 바로 반영돼요.</span>
     </nav>
     <div class="ed-body">
       <div class="ed-errors" role="alert" tabindex="-1" hidden><strong>다음 내용을 확인해 주세요.</strong><ul></ul></div>
@@ -372,31 +378,40 @@ function editorMarkup(isNew, allowTemplateChange, onExportDraft) {
       <p class="ed-font-notice" role="note" hidden></p>
       <div class="ed-grid">
         <div class="ed-main">
-          <section class="ed-content-section">
-            <h3>기본 정보</h3>
+          <section class="ed-content-section ed-basics" aria-label="기본 정보">
+            <div class="ed-section-heading"><h3>기본 정보</h3><span class="ed-eyebrow">어떤 장면인가요?</span></div>
             ${allowTemplateChange ? `<label for="ed-template">장면 템플릿</label>
               <select id="ed-template" data-field="templateId">${optionsHtml(Object.entries(templateLabels))}</select>` : ''}
             <label for="ed-title">장면 제목</label>
-            <input id="ed-title" data-field="title" ${pathAttr('title', '장면 제목')} autocomplete="off">
+            <input id="ed-title" data-field="title" ${pathAttr('title', '장면 제목')} placeholder="예: 세 음으로 화음 만들기" autocomplete="off">
             <p class="ed-count" data-count="title" id="ed-title-count"></p>
-            <label for="ed-question">질문</label>
-            <textarea id="ed-question" data-field="question" ${pathAttr('question', '질문')}></textarea>
+            <label for="ed-question">질문 <span class="ed-optional">선택</span></label>
+            <textarea id="ed-question" data-field="question" ${pathAttr('question', '질문')} placeholder="학생에게 먼저 던질 질문을 적어 보세요." rows="2"></textarea>
             <p class="ed-count" data-count="question" id="ed-question-count"></p>
-            <label for="ed-caption">정리 문장</label>
-            <textarea id="ed-caption" data-field="caption" ${pathAttr('caption', '정리 문장')}></textarea>
+            <label for="ed-caption">정리 문장 <span class="ed-optional">선택</span></label>
+            <textarea id="ed-caption" data-field="caption" ${pathAttr('caption', '정리 문장')} placeholder="이 장면에서 기억할 한 문장을 적어 보세요." rows="3"></textarea>
             <p class="ed-count" data-count="caption" id="ed-caption-count"></p>
-            <label for="ed-tags">태그</label>
-            <input id="ed-tags" data-field="tags" ${pathAttr('tags', '태그')}>
-            <p class="ed-muted">쉼표로 구분하여 최대 5개까지 입력합니다.</p>
+            <details class="ed-tags-details"><summary>태그로 분류하기 <span class="ed-optional">선택</span></summary><label for="ed-tags">태그</label>
+              <input id="ed-tags" data-field="tags" ${pathAttr('tags', '태그')} placeholder="예: 화음, 초등, 합주">
+              <p class="ed-muted">쉼표로 구분해 최대 5개까지 입력해요.</p>
+            </details>
           </section>
-          <section class="ed-content-section"><h3 data-template-heading></h3><div class="ed-template"></div></section>
-          <section class="ed-stage-section"><h3>판서 순서</h3>
-            <p class="ed-muted">판서할 내용을 선택해 단계에서 분리하거나 다음 단계와 병합할 수 있습니다.</p>
+          <section class="ed-content-section ed-score-section" aria-label="판서 내용"><div class="ed-section-heading"><h3 data-template-heading></h3><span class="ed-eyebrow">칠판에 보여 줄 내용</span></div><div class="ed-template"></div></section>
+          <section class="ed-stage-section" aria-label="판서 순서"><div class="ed-section-heading"><h3>판서 순서</h3><span class="ed-eyebrow">설명 흐름을 정해 보세요.</span></div>
+            <p class="ed-muted">오른쪽 슬라이더로 단계별 모습을 확인하세요. 단계 안의 내용을 선택하면 나누거나 합칠 수 있어요.</p>
             <div class="ed-steps"></div><p class="ed-inline"><span data-activity-actions></span>${command('reset-steps', '기본 순서로 되돌리기')}</p>
           </section>
         </div>
-        <aside><h3>내용 확인</h3><div class="ed-preview"></div><p data-review-steps></p><p class="ed-activity-summary" data-activity-summary></p>
-
+        <aside class="ed-review-panel" aria-label="실시간 미리보기">
+          <div class="ed-section-heading"><h3>실시간 미리보기</h3><span class="ed-live-badge">저장 전</span></div>
+          <div class="ed-preview-options"><label>판 <select data-preview-theme aria-label="미리보기 보드">${optionsHtml([['chalk','칠판'],['white','화이트보드']],'chalk')}</select></label><label>화면 <select data-preview-orientation aria-label="미리보기 화면 방향">${optionsHtml([['landscape','가로'],['portrait','세로']],'landscape')}</select></label></div>
+          <div class="ed-canvas-stage" data-theme="chalk" data-orientation="landscape" role="img" aria-label="저장 전 장면 미리보기"><div class="ed-canvas-ink"></div><span class="ed-preview-brand" aria-hidden="true">레슨 디자이너</span></div>
+          <p class="ed-preview-message" role="note" hidden></p>
+          <div class="ed-preview-scrubber"><label for="ed-preview-through">보여 줄 단계 <output data-preview-position aria-hidden="true"></output></label><input id="ed-preview-through" type="range" min="0" max="1" step="1" value="1" aria-label="미리보기 단계"><div class="ed-range-scale"><span>빈 칠판</span><span>전체 완성</span></div></div>
+          <p class="ed-preview-summary" data-review-steps></p>
+          <details class="ed-preview-details"><summary>칠판 내용 읽기</summary><div class="ed-preview"></div></details>
+          <details class="ed-activity-details"><summary>듣기·해보기 활동</summary><p class="ed-activity-summary" data-activity-summary></p></details>
+          <p class="ed-muted">전체 화면 미리보기에서 실제 크기와 판서 진행을 확인할 수 있어요.</p>
         </aside>
       </div>
     </div>
@@ -407,7 +422,7 @@ function editorMarkup(isNew, allowTemplateChange, onExportDraft) {
       </div>
     </div>
     <footer>
-      <span class="ed-status" role="status"></span>
+      <div class="ed-footer-status"><span class="ed-status" role="status"></span><span class="ed-save-hint">장면을 저장하면 수업에서 다시 열 수 있어요.</span></div>
       <div class="ed-inline ed-footer-actions">
         ${command('preview', '전체 화면 미리보기')}${command('save', '장면 저장', 'class="primary"')}
       </div>
@@ -418,7 +433,7 @@ function editorMarkup(isNew, allowTemplateChange, onExportDraft) {
 /** The editor owns an isolated draft. Callbacks never get mutable editor state. */
 export function openSceneEditor({
   scene, onSave, onPreview, onDraft, onDiscard, onExportDraft, onClose, onRegenerate, isNew = false,
-  allowTemplateChange = false, preserveInitialDraft = false, fontAvailable = true,
+  allowTemplateChange = false, preserveInitialDraft = false, fontAvailable = true, initialTheme = 'chalk',
   getLayoutFeedback = checkDocumentLayout,
 } = {}) {
   if (!scene) throw new Error('편집할 장면이 필요합니다.');
@@ -446,6 +461,7 @@ export function openSceneEditor({
   let draftQueue = Promise.resolve();
   let cleanupRequired = false, autosaveQueued = false, autosaveVersion = 0;
   let disabledControls = null;
+  let previewThrough = null, previewPortrait = false, previewTheme = initialTheme === 'white' ? 'white' : 'chalk', previewKey = '';
   const restoreBaselineDraft = () => preserveInitialDraft && onDraft ? onDraft(copy(original)) : onDiscard?.(copy(draft));
 
   function status(message, error = false) {
@@ -457,7 +473,11 @@ export function openSceneEditor({
     tab = nextTab;
     dialog.dataset.tab = tab;
     for (const button of all('[data-tab]')) button.setAttribute('aria-pressed', String(button.dataset.tab === tab));
-    if (reset) body.scrollTop = 0;
+    if (reset) {
+      body.scrollTop = 0;
+      for (const panel of all('.ed-grid > aside,.ed-main > section')) panel.scrollTop = 0;
+    }
+    find('.ed-nav-hint').textContent = tab === 'steps' ? '단계별 칠판 모습을 슬라이더로 확인해 보세요.' : '입력한 내용은 칠판에 바로 반영돼요.';
   }
 
   function setBusy(busy) {
@@ -686,6 +706,8 @@ export function openSceneEditor({
     find('.ed-preview').textContent = [draft.question, preview, draft.caption].filter(Boolean).join('\n\n');
     find('[data-review-steps]').textContent = `${draft.steps.length}단계 · ${templateLabels[draft.templateId]}`;
     find('[data-activity-summary]').textContent = activitySummary(draft);
+    syncRangeReadouts();
+    refreshPreview();
     let sourceNotice = find('[data-source-notice]');
     if (content.source && !sourceNotice) {
       sourceNotice = document.createElement('div'); sourceNotice.dataset.sourceNotice = '';
@@ -711,6 +733,58 @@ export function openSceneEditor({
     return !errors.length;
   }
 
+  function syncRangeReadouts() {
+    const notes = draft.content.columns?.flatMap(column=>column.notes) || draft.content.notes || [];
+    for (const range of all('.ed-range')) {
+      const input = range.querySelector('input[type="range"]');
+      const kind = range.dataset.rangeKind;
+      let text;
+      if (kind === 'pitch') {
+        const pitch = parsePitch(notes.find(note=>note.id === input.dataset.pitchSlider)?.pitch);
+        if (pitch) input.value = naturalPitches.indexOf(pitch.letter+pitch.octave);
+        text = pitch ? `${pitchText(formatPitch(pitch),draft.content.key)} · ${formatPitch(pitch)}` : '음을 선택해 주세요';
+      } else if (kind === 'hold') text = secondsText(input.value);
+      else if (kind === 'level') text = `${Math.round(Number(input.value)*100)}%`;
+      else text = `${input.value} BPM`;
+      input.setAttribute('aria-valuetext',text);
+      range.querySelector('[data-range-value]').textContent = text;
+    }
+  }
+
+  function scrubPreview(control) {
+    const through = Number(control.value);
+    previewThrough = through >= draft.steps.length ? null : through;
+    refreshPreview();
+  }
+
+  function refreshPreview() {
+    const total = draft.steps.length;
+    const through = Math.max(0,Math.min(total,previewThrough ?? total));
+    const scrubber = find('#ed-preview-through');
+    scrubber.max = total;
+    scrubber.value = through;
+    const position = through === 0 ? '빈 칠판' : `${through} / ${total}단계${through === total ? ' · 전체' : ''}`;
+    find('[data-preview-position]').textContent = position;
+    scrubber.setAttribute('aria-valuetext',through ? `${position} · ${draft.steps[through-1]?.label || ''}` : position);
+    const stage = find('.ed-canvas-stage');
+    stage.dataset.theme = previewTheme;
+    stage.dataset.orientation = previewPortrait ? 'portrait' : 'landscape';
+    const key = JSON.stringify([draft.templateId,draft.question,draft.caption,draft.content,draft.steps.map(step=>step.groupIds),through,previewTheme,previewPortrait]);
+    if (key === previewKey) return;
+    const message = find('.ed-preview-message');
+    try {
+      const description = renderEditorPreview(find('.ed-canvas-ink'),draft,{portrait:previewPortrait,theme:previewTheme,through});
+      stage.setAttribute('aria-label','저장 전 미리보기 · '+description);
+      message.hidden = true;
+      stage.removeAttribute('data-invalid');
+      previewKey = key;
+    } catch {
+      stage.setAttribute('data-invalid','true');
+      message.textContent = '내용을 확인하면 칠판 미리보기가 갱신돼요.';
+      message.hidden = false;
+    }
+  }
+
   function update(control) {
     const key = control.dataset.field;
     const content = draft.content;
@@ -721,6 +795,16 @@ export function openSceneEditor({
     else if (control.dataset.memo) content.columns.find(column => column.id === control.dataset.memo).teacherMemo = control.value;
     else if (control.dataset.stepLabel) draft.steps.find(step => step.id === control.dataset.stepLabel).label = control.value;
     else if (control.dataset.hold) draft.steps.find(step => step.id === control.dataset.hold).holdMs = Number(control.value);
+    else if (control.dataset.pitchSlider) {
+      const notes = content.columns ? content.columns.flatMap(column=>column.notes) : content.notes || [];
+      const note = notes.find(note=>note.id === control.dataset.pitchSlider);
+      if (!note) return false;
+      const pitch = parsePitch(naturalPitches[Number(control.value)]);
+      if (!pitch) return false;
+      note.pitch = pitch.letter + accidentalText(parsePitch(note.pitch)?.acc || 0) + pitch.octave;
+      const select = all('[data-note]').find(select=>select.dataset.note === note.id);
+      if (select) select.value = pitch.letter+pitch.octave;
+    }
     else if (control.dataset.diagramText) {
       const field = control.dataset.diagramText;
       const item = draft.content.items.find(item => item.id === control.dataset.id);
@@ -745,6 +829,7 @@ export function openSceneEditor({
 
   function textInput(control) {
     if (!update(control)) return;
+    syncRangeReadouts();
     const needsSteps = ['question', 'caption', 'chordName'].includes(control.dataset.field) && syncSteps();
     if (needsSteps) renderSteps();
     scheduleDraft();
@@ -836,6 +921,9 @@ export function openSceneEditor({
   }
 
   async function selectChange(control) {
+    if (control.hasAttribute('data-preview-theme')) { previewTheme = control.value; refreshPreview(); return; }
+    if (control.hasAttribute('data-preview-orientation')) { previewPortrait = control.value === 'portrait'; refreshPreview(); return; }
+    if (control.type === 'range') { if (control.id === 'ed-preview-through') scrubPreview(control); else textInput(control); return; }
     const { field, note, accidental, highlight, ink, advance, labelMode, chordEdit } = control.dataset;
     const content = draft.content;
     if (field === 'templateId' && control.value !== draft.templateId) {
@@ -1179,7 +1267,10 @@ export function openSceneEditor({
     textInput(event.target);
   });
   dialog.addEventListener('input', event => {
-    if (!disabledControls && !composing && !event.isComposing) textInput(event.target);
+    if (!disabledControls && !composing && !event.isComposing) {
+      if (event.target.id === 'ed-preview-through') scrubPreview(event.target);
+      else textInput(event.target);
+    }
   });
   dialog.addEventListener('change', event => {
     if (!disabledControls && !confirming) void selectChange(event.target);
@@ -1235,6 +1326,7 @@ export function openSceneEditor({
   });
 
   for (const field of ['title', 'question', 'caption', 'tags']) find(`#ed-${field}`).value = field === 'tags' ? draft.tags.join(', ') : draft[field];
+  find('[data-preview-theme]').value = previewTheme;
   setTab(tab);
   renderTemplate();
   renderSteps();

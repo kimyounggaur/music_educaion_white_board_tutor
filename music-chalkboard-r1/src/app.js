@@ -315,7 +315,7 @@ async function editDoc(original, isNew = false, allowTemplateChange = false, rec
     refreshNavigation();
   };
   openSceneEditor({
-    scene: doc, isNew, allowTemplateChange, preserveInitialDraft: !!recoveredDraft, fontAvailable,
+    scene: doc, isNew, allowTemplateChange, preserveInitialDraft: !!recoveredDraft, fontAvailable, initialTheme:player.opts.theme,
     getLayoutFeedback: checkDocumentLayout,
     onRegenerate: snapshot => new Promise(resolve => {
       createFromTopic({ source:snapshot.content.source, onResult:resolve });
