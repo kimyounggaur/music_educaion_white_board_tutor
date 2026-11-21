@@ -1,6 +1,8 @@
 import {validateScene} from './scene-model.js';
 import {validateLesson} from './lesson-model.js';
 import {inspectTree, makeScenePackage} from './scene-storage.js';
+import {makeCardShareLink, readCardShareLink} from './cards/share.js';
+import {materializeCard} from './cards/index.js';
 
 export const MAX_SHARE_URL_CHARS = 4096;
 export const MAX_SHARE_JSON_BYTES = 3072;
@@ -29,6 +31,11 @@ export function makeShareLink({baseUrl, scene, lesson, scenes = []}) {
   const url = new URL(baseUrl);
   if (url.protocol !== 'https:' || url.username || url.password) throw new Error('HTTPS로 열린 앱에서 공유 링크를 만들 수 있습니다.');
   url.search = '';
+  const selected = lesson ? scenes : [scene];
+  if (selected.every(item=>validateScene(item).valid && !item.deletedAt) && (!lesson || validateLesson(lesson,{sceneIds:new Set(scenes.map(item=>item.id))}).valid)) {
+    const recommended = makeCardShareLink({baseUrl,scene,lesson,scenes});
+    if (recommended) return recommended;
+  }
   const payload = lesson ? {
     version:1, kind:'lesson',
     lesson:{title:lesson.title, grade:lesson.grade, sceneRefs:[]},
@@ -65,6 +72,12 @@ function restoreScene(content, index, time) {
 
 export function readShareLink(hashOrUrl) {
   if (typeof hashOrUrl !== 'string') return null;
+  const card = readCardShareLink(hashOrUrl);
+  if (card) {
+    const result = materializeCard(card.result,{idPrefix:'shared-card',now:new Date().toISOString(),renderSeed:100});
+    return {kind:result.lesson ? 'lesson' : 'scene',scenes:result.scenes,lesson:result.lesson,
+      bundle:makeScenePackage(result.scenes,{lessons:result.lesson ? [result.lesson] : []}),card:card.descriptor};
+  }
   const firstHash = hashOrUrl.indexOf('#');
   if (firstHash === -1) return null;
   const hash = hashOrUrl.slice(firstHash);

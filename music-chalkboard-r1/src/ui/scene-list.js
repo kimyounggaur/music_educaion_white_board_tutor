@@ -1,6 +1,6 @@
 import { confirmAction } from './confirm-dialog.js';
 // 장면 목록은 임시 대화창으로만 표시한다. 데이터와 동작은 호출자가 제공한다.
-const TEMPLATE_LABELS = { 'chord-stack': '화음 쌓기', 'note-selection': '음 고르기', 'text-explanation': '글 설명' };
+const TEMPLATE_LABELS = { 'chord-stack': '화음 쌓기', 'note-selection': '음 고르기', 'text-explanation': '글 설명', 'diagram':'도식' };
 const compact = value => value.replace(/[\s·ㆍ•]/gu, '');
 const normalize = (value) => String(value ?? '').normalize('NFC').toLocaleLowerCase().trim();
 const templateLabel = (scene) => TEMPLATE_LABELS[scene.templateId] || scene.templateId || '장면';
@@ -15,7 +15,8 @@ export function searchScenes(scenes, query) {
     const tags = normalize((scene.tags || []).join(' '));
     const content = scene.content || {};
     const body = normalize([scene.question, scene.caption, templateLabel(scene), content.chordName, ...(content.columns || []).flatMap(column => [column.teacherNote, column.legacyLabel, ...(column.notes || []).map(note => note.pitch)]),
-      ...(Array.isArray(content.blocks) ? content.blocks.map((block) => typeof block === 'string' ? block : block.text || '') : [])].join(' '));
+      ...(Array.isArray(content.blocks) ? content.blocks.map((block) => typeof block === 'string' ? block : block.text || '') : []),
+      ...(Array.isArray(content.items) ? content.items.flatMap(item=>[item.label,item.sub]) : [])].join(' '));
     const all = `${title} ${tags} ${body}`;
     const joined = compact(all);
     const score = title === normalized ? 0 : title.includes(normalized) ? 1 : tags.includes(normalized) ? 2 : 3;
@@ -48,6 +49,7 @@ export function openSceneList(options) {
   for (const [value, label] of [['manual','직접 정한 순서'],['updated','최근 수정'],['title','이름순']]) { const option = document.createElement('option'); option.value = value; option.textContent = label; sort.append(option); }
   toolbar.append(search, sort);
   if (options.onNew) toolbar.append(button('새 장면', () => runAction(options.onNew, null, true), 'wb-primary'));
+  if (options.onTopic) toolbar.append(button('주제로 만들기', () => runAction(options.onTopic, null, true)));
   header.append(toolbar);
   const tabs = document.createElement('div'); tabs.className = 'wb-tabs'; tabs.setAttribute('role', 'tablist'); tabs.setAttribute('aria-label', '장면 분류');
   const tabButtons = {};

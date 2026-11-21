@@ -1,7 +1,8 @@
 // 장면 만들기: 칠판에 쓸 것을 "순서대로 쓰는 길"의 목록으로 바꾼다.
 // 글씨는 글꼴 윤곽 + 뽑아 둔 획, 악보는 직접 계산한 길이다.
+import { describeInterval } from './theory/interval.js';
 import { bounds, chaikin, ellipseArc, hashString, resample, rng, wobble, cumulative } from "./util.js";
-import { CLEF_BOX, accidentalUnits, clefUnits, diatonicIndex, ledgerIndices, noteY, signatureSymbols } from "./symbols.js";
+import { CLEF_BOX, accidentalUnits, clefUnits, diatonicIndex, ledgerIndices, noteY, signatureSymbols, bracketUnits, diagramSymbolUnits } from "./symbols.js";
 import { activeGroups, columnGroupIds, getColumns } from "./scene-model.js";
 import { formatPitch, parsePitch } from "./theory/pitch.js";
 import { accidentalEvents, DEFAULT_KEY, isSupportedKey, keySignatureAccidentals } from "./theory/scale.js";
@@ -144,7 +145,7 @@ function textFields(doc, portrait, metrics) {
 }
 
 function mapNotation(doc, portrait, metrics) {
-  if (doc.templateId === "text-explanation") return null;
+  if (!["chord-stack","note-selection"].includes(doc.templateId)) return null;
   const key = isSupportedKey(doc.content?.key) ? doc.content.key : DEFAULT_KEY;
   const signature = signatureSymbols(keySignatureAccidentals(key.tonic, key.mode));
   const columns = getColumns(doc).filter(col => col.notes?.length).map(col => ({
@@ -166,8 +167,8 @@ function mapNotation(doc, portrait, metrics) {
       }
       return { ...note, pitch, offset, symbol, lane };
     });
-    const labelRoom = column.kind === "chord" && column.labelMode !== "none" ? 2.8 : 0;
-    return { column, notes, labelRoom, minimum: (column.kind === "chord" ? 3.5 : 2.6) + lanes.length * 1.1 + labelRoom };
+    const labelRoom = ["chord","dyad"].includes(column.kind) && column.labelMode !== "none" ? 2.8 : 0;
+    return { column, notes, labelRoom, minimum: (["chord","dyad"].includes(column.kind) ? 3.5 : 2.6) + lanes.length * 1.1 + labelRoom };
   });
   const reserved = 4.2 + signature.length * 1.12;
   const needed = reserved + groups.reduce((total, group) => total + group.minimum, 0);
@@ -187,10 +188,78 @@ function mapNotation(doc, portrait, metrics) {
   return { key, signature, groups, u, overflow: u < (portrait ? 12 : 15) };
 }
 
+function mapDiagram(doc, portrait, metrics) {
+  const c=doc.content, items=Array.isArray(c.items)?c.items:[], n=items.length, issues=[];
+  const top=portrait?173:169, bottom=portrait?470:466, width=metrics.x1-metrics.x0;
+  const cells=[]; const labels=[];
+  const addText=(group,text,x,baseY,maxWidth,size,maxRows,ink)=>{
+    if(!text?.trim())return;
+    const layout=layoutParagraph(text,{size,minSize:14,maxWidth,maxRows});
+    if(layout.overflow) issues.push({field:'content.items',message:'도식의 글자가 자리를 넘어요. 글자를 줄이거나 장면을 나누어 주세요.'});
+    labels.push({group,text,x,baseY,maxWidth,layout,ink,maxRows});
+  };
+  if (c.kind==='sequence') {
+    const maxColumns=portrait?3:5, rows=Math.ceil(n/maxColumns)||1, rowHeight=(bottom-top)/rows;
+    items.forEach((item,index)=>{
+      const row=Math.floor(index/maxColumns), start=row*maxColumns, count=Math.min(maxColumns,n-start), column=index%maxColumns;
+      const arrow=portrait?20:30, cellWidth=(width-arrow*(count-1))/count, height=Math.min(110,cellWidth*.62,rowHeight-65);
+      const x=metrics.x0+column*(cellWidth+arrow),y=top+row*rowHeight;
+      const cell={item,x,y,width:cellWidth,height,row};cells.push(cell);
+      addText(`box-label/${item.id}`,item.label,x+cellWidth/2,y+height*.72,cellWidth-10,Math.min(height*.5,40),2,item.ink);
+      addText(`box-sub/${item.id}`,item.sub,x+cellWidth/2,y+height+17,cellWidth-6,portrait?17:21,2,item.ink);
+    });
+  } else if(c.kind==='ladder') {
+    const cellWidth=width/Math.max(n,1), rise=Math.min(32,(bottom-top-115)/Math.max(n,1)), base=bottom-85;
+    items.forEach((item,index)=>{
+      const x=metrics.x0+index*cellWidth,y=base-index*rise;
+      const cell={item,x,y,width:cellWidth,height:rise};cells.push(cell);
+      addText(`box-label/${item.id}`,item.label,x+cellWidth/2,y-16,cellWidth-8,portrait?22:30,2,item.ink);
+      addText(`box-sub/${item.id}`,item.sub,x+cellWidth/2,bottom-45,cellWidth-6,portrait?16:20,2,item.ink);
+    });
+  } else {
+    const gap=width/Math.max(n,1), y=top+145;
+    items.forEach((item,index)=>{
+      const x=metrics.x0+index*gap;
+      const cell={item,x,y:y-8,width:gap,height:16};cells.push(cell);
+      addText(`box-label/${item.id}`,item.label,x+gap/2,y-63,gap-6,portrait?19:25,3,item.ink);
+      addText(`box-sub/${item.id}`,item.sub,x+gap/2,y+34,gap-6,portrait?16:21,3,item.ink);
+    });
+  }
+  return {cells,labels,issues,kind:c.kind,top,bottom,metrics};
+}
+
+function drawDiagram(doc,diagram,put,seed) {
+  const {cells,labels,kind,metrics,bottom}=diagram, c=doc.content;
+  const line=(group,role,paths,ink='main')=>put(group,paths.map((pts,index)=>({type:'line',role,id:`${role}-${index}`,ink,drawDuration:role==='box'?(kind==='ladder'?.3:kind==='line'?.1:.5):undefined,strokes:[lineStroke(pts,2.4,seed+hashString(group)+index,.25)],pen:0})),group);
+  if(kind==='line') {const y=cells[0]?.y+8;line('axis','axis',[[[metrics.x0,y],[metrics.x1,y]]]);}
+  for(const [index,cell] of cells.entries()) {
+    const {item,x,y,width,height}=cell;
+    if(kind==='sequence') line(`box/${item.id}`,'box',diagramSymbolUnits('box').map(path=>path.map(([px,py])=>[x+px*width,y+py*height])),item.ink);
+    else if(kind==='ladder') line(`box/${item.id}`,'box',[[[x,y+height],[x,y],[x+width,y]]],item.ink);
+    else line(`box/${item.id}`,'box',[[[x+width/2,y],[x+width/2,y+height]]],item.ink);
+    if(kind==='sequence' && c.arrows && index>0) {
+      const prev=cells[index-1];
+      if(prev.row===cell.row) {
+        const x0=prev.x+prev.width+3,x1=x-4,cy=y+height/2;
+        line(`arrow/${item.id}`,'arrow',[[[x0,cy],[x1,cy]],[[x1-5,cy-5],[x1,cy],[x1-5,cy+5]]],'accent');
+      } else {
+        const cx=x+width/2,ey=y-2;
+        line(`arrow/${item.id}`,'arrow',[[[cx,ey-14],[cx,ey]],[[cx-5,ey-5],[cx,ey],[cx+5,ey-5]]],'accent');
+      }
+    }
+  }
+  if(kind==='ladder') for(const [index,type] of (c.hairpins??[]).entries()) {
+    const x0=metrics.x0+12,x1=metrics.x1-12,y=bottom-20+index*13,half=5;
+    line(`hairpin/${type}`,'hairpin',type==='up'?[[[x0,y],[x1,y-half]],[[x0,y],[x1,y+half]]]:[[[x0,y-half],[x1,y]],[[x0,y+half],[x1,y]]],'accent');
+  }
+  for(const label of labels) put(label.group,fitVisibleRows(label.layout,label.maxRows,label.maxWidth).flatMap((row,index)=>lineItems(row,{x:label.x,baseY:label.baseY+index*label.layout.lineHeight,size:label.layout.size,align:'center',ink:label.ink,idPrefix:`line${index}`,seed:seed+hashString(label.group)})),label.text);
+}
+
 function prepareLayout(doc, portrait) {
   const metrics = metricsFor(portrait);
   const fields = textFields(doc, portrait, metrics);
   const notation = mapNotation(doc, portrait, metrics);
+  const diagram = doc.templateId === "diagram" ? mapDiagram(doc, portrait, metrics) : null;
   const issues = fields.filter(field => field.layout.overflow).map(field => ({
     field: field.field,
     message: `${field.field === "question" ? "질문" : field.field === "caption" ? "정리 문장" : "본문"}이 칠판 영역을 넘어요. 문장을 줄이거나 장면을 나눠 주세요.`,
@@ -198,7 +267,19 @@ function prepareLayout(doc, portrait) {
   if (notation?.overflow) issues.push({
     field: "content.columns", message: "이 화면에서 음표 사이가 좁아요. 여러 장면으로 열을 나누면 더 크게 표시됩니다.",
   });
-  return { metrics, fields, notation, issues };
+  if (diagram) issues.push(...diagram.issues);
+  if (notation && Array.isArray(doc.content.intervals)) {
+    const yb=portrait?321:315, u=notation.u;
+    const spots=new Map(notation.groups.flatMap(g=>g.notes.map(n=>[n.id,{x:g.cx,y:noteY(formatPitch(n.pitch),yb,u)}])));
+    const question=fields.find(field=>field.field==='question');
+    const questionBottom=question ? question.start+(question.layout.rows.length-1)*question.layout.lineHeight+question.layout.size*.3 : 100;
+    for (const interval of doc.content.intervals) {
+      const a=spots.get(interval.from),b=spots.get(interval.to); if(!a||!b||a.x===b.x)continue;
+      const top=Math.min(yb-6*u,a.y-2*u,b.y-2*u)-1.5*u;
+      if(top<questionBottom || (top<metrics.H*.1 && Math.max(a.x,b.x)>metrics.W/2)) issues.push({field:'content.intervals',message:'음정 표시가 질문이나 고정 문구 자리와 겹쳐요. 음역을 낮추거나 장면을 나누어 주세요.'});
+    }
+  }
+  return { metrics, fields, notation, diagram, issues };
 }
 
 export function checkDocumentLayout(doc) {
@@ -234,7 +315,8 @@ function drawNotation(doc, portrait, metrics, notation, put, seed) {
 
   if (signature.length) {
     const items = signature.map(({ symbol, pitch }, index) => accidentalItem(symbol, x0 + (3.6 + index * 1.12) * u, noteY(pitch, yb, u), u, seed + index * 31, `key/${index}`, "key-signature"));
-    put("key-signature", items, `${keyNameKo(key.tonic, key.mode)} 조표 ${signature.map(({ symbol, pitch }) => pitch[0] + symbol).join(" · ")}`);
+    if (doc.content.splitSignature) items.forEach((item,index)=>put(`key-signature/${index+1}`,[item],`조표 ${index+1}번째`));
+    else put("key-signature", items, `${keyNameKo(key.tonic, key.mode)} 조표 ${signature.map(({ symbol, pitch }) => pitch[0] + symbol).join(" · ")}`);
   }
 
   const labelAt = (group, text, x, y, size, width, ink = "main", roman = false) => {
@@ -250,8 +332,11 @@ function drawNotation(doc, portrait, metrics, notation, put, seed) {
     strokes: [circleStroke(x, y, rx, ry, u, seed + 606)], pen: 0,
   }], label);
   let previous;
+  let countIndex = 0;
+  const noteSpots = new Map();
   for (const { column, notes, cx, maxLabelWidth, labelRoom, labelX } of groups) {
     const spots = [];
+    if (column.labelMode === "count") countIndex++;
     let lastSideLabelY = Infinity;
     for (const [index, note] of notes.entries()) {
       const x = cx + (note.offset ? .8 * u : 0);
@@ -272,13 +357,14 @@ function drawNotation(doc, portrait, metrics, notation, put, seed) {
       });
       put(id, elements, `${formatNoteLabel(noteName, "fixed-do", key)} ${noteName}`);
       spots.push({ x, y });
+      noteSpots.set(note.id,{x,y,column:column.id,pitch:noteName});
       if (column.labelMode !== "none") {
         const size = Math.max(20, u * 1.32);
-        const text = formatNoteLabel(noteName, column.labelMode, key);
-        const blockX = column.kind === "chord" ? labelX : x;
-        const blockY = column.kind === "chord" ? Math.min(lastSideLabelY - (labelRoom ? u * 1.22 : 0), y + .34 * u) : yb + 2.48 * u;
+        const text = column.labelMode === "count" ? String(countIndex) : formatNoteLabel(noteName, column.labelMode, key);
+        const blockX = ["chord","dyad"].includes(column.kind) ? labelX : x;
+        const blockY = ["chord","dyad"].includes(column.kind) ? Math.min(lastSideLabelY - (labelRoom ? u * 1.22 : 0), y + .34 * u) : yb + 2.48 * u;
         lastSideLabelY = blockY;
-        if (column.labelMode === "both" && column.kind !== "chord" && text.includes(" · ")) {
+        if (column.labelMode === "both" && !["chord","dyad"].includes(column.kind) && text.includes(" · ")) {
           const [first, second] = text.split(" · ");
           const combined = [first, second].flatMap((row, rowIndex) => {
             const layout = layoutParagraph(row, { size, minSize: 14, maxWidth: maxLabelWidth, maxRows: 1 });
@@ -288,15 +374,15 @@ function drawNotation(doc, portrait, metrics, notation, put, seed) {
             }));
           });
           put(`label/${note.id}`, combined, text);
-        } else labelAt(`label/${note.id}`, text, blockX, blockY, size, column.kind === "chord" ? Math.max(18, labelRoom * u - 2) : maxLabelWidth);
+        } else labelAt(`label/${note.id}`, text, blockX, blockY, size, ["chord","dyad"].includes(column.kind) ? Math.max(18, labelRoom * u - 2) : maxLabelWidth);
       }
       if (column.highlightNoteIds?.includes(note.id)) circle(`emphasis/${note.id}`, x, y, 1.32 * u, .98 * u, `${formatNoteLabel(noteName, "fixed-do", key)} 강조`);
     }
-    if (column.kind === "chord") {
+    if (column.kind === "chord" || column.kind === "dyad") {
       const ids = columnGroupIds(column);
       const chord = doc.schemaVersion === 1
         ? { name: column.legacyName ?? "", roman: column.legacyRoman ?? "" }
-        : describeChord(column, key);
+        : column.kind === "dyad" ? describeInterval(notes[0].pitch, notes[1].pitch) : describeChord(column, key, doc.templateVersion === 3);
       const lowest = Math.max(...spots.map(spot => spot.y));
       const highest = Math.min(...spots.map(spot => spot.y));
       const baseline = Math.max(yb + 2.85 * u, lowest + 2.65 * u);
@@ -310,16 +396,27 @@ function drawNotation(doc, portrait, metrics, notation, put, seed) {
     }
     if (doc.content?.showGaps && previous && previous.column.kind === "note" && column.kind === "note") {
       const diff = Math.abs(notes[0].pitch.midi - previous.notes[0].pitch.midi);
-      const word = diff === 1 ? "반음" : diff === 2 ? "온음" : "";
+      const word = diff === 1 ? "반음" : diff === 2 ? "온음" : diff === 3 ? "1음 반" : "";
       labelAt(`gap/${column.id}`, word, (previous.cx + cx) / 2, yb + 5.1 * u, Math.max(16, u * 1.08), (cx - previous.cx) - 4, "accent");
     }
     previous = { column, notes, cx };
+  }
+  for (const interval of doc.content.intervals ?? []) {
+    const a=noteSpots.get(interval.from),b=noteSpots.get(interval.to);if(!a||!b)continue;
+    const description=describeInterval(a.pitch,b.pitch), group=`interval/${interval.id}`;
+    if (!description.name) { put(group,[]); continue; }
+    if (a.column===b.column) {labelAt(group,description.name,a.x,Math.max(yb+3*u,a.y+2.7*u,b.y+2.7*u),Math.max(21,u*1.15),5*u,'accent');continue;}
+    const x0=Math.min(a.x,b.x),x1=Math.max(a.x,b.x),y=Math.min(yb-6*u,a.y-2*u,b.y-2*u);
+    const bracket={type:'line',role:'bracket',id:'bracket',ink:'accent',strokes:[lineStroke(bracketUnits((x1-x0)/u).map(([px,py])=>[x0+px*u,y+py*u]),Math.max(2,u*.13),seed+hashString(group),.015*u)],pen:0};
+    const layout=layoutParagraph(description.name,{size:Math.max(21,u*1.15),minSize:14,maxRows:1,maxWidth:Math.max(70,x1-x0)});
+    const label=fitVisibleRows(layout,1,Math.max(70,x1-x0)).flatMap(row=>lineItems(row,{x:(x0+x1)/2,baseY:y-.5*u,size:layout.size,align:'center',ink:'accent',idPrefix:'label',seed:seed+hashString(group)}));
+    put(group,[bracket,...label],description.name);
   }
 }
 
 /** 저장된 장면 문서를 현재 방향의 그리기 항목으로 변환한다. */
 export function buildDocumentScene(doc, portrait) {
-  const { metrics, fields, notation, issues } = prepareLayout(doc, portrait);
+  const { metrics, fields, notation, diagram, issues } = prepareLayout(doc, portrait);
   const groups = new Map(activeGroups(doc).map(id => [id, []]));
   const descriptions = new Map();
   const seed = Number.isInteger(doc.renderSeed) ? doc.renderSeed : 1;
@@ -345,6 +442,7 @@ export function buildDocumentScene(doc, portrait) {
     })), text);
   }
   if (notation) drawNotation(doc, portrait, metrics, notation, put, seed);
+  if (diagram) drawDiagram(doc,diagram,put,seed);
   const items = [];
   for (const step of doc.steps) {
     for (const id of step.groupIds) {
@@ -356,6 +454,7 @@ export function buildDocumentScene(doc, portrait) {
   return {
     key: doc.id, ...metrics, items, groups, descriptions, lineCounts, layoutErrors: issues,
     layoutWarnings: portrait ? issues : [], clefBox: CLEF_BOX,
+    diagramItems: diagram?.cells.map(cell=>({id:cell.item.id,label:cell.item.label,x0:cell.x,y0:cell.y,x1:cell.x+cell.width,y1:cell.y+cell.height})) ?? [],
     noteColumns: notation?.groups.map(group => group.column.id) ?? [],
   };
 }

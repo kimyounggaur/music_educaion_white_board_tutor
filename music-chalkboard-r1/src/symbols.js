@@ -76,3 +76,15 @@ export function signatureSymbols(signature) {
 export function accidentalUnits(symbol) {
   return ACCIDENTAL_STROKES[symbol] ?? [];
 }
+
+/** Staff-unit interval bracket: two half-space ticks and one horizontal line. */
+export function bracketUnits(width) { return [[0,.5],[0,0],[width,0],[width,.5]]; }
+
+/** Normalized one-stroke geometry reused by both rendering methods. */
+export function diagramSymbolUnits(kind) {
+  if (kind === 'box') return [[[0,0],[1,0],[1,1],[0,1],[0,0]]];
+  if (kind === 'arrow') return [[[0,.5],[1,.5]],[[.8,0],[1,.5],[.8,1]]];
+  if (kind === 'hairpin-up') return [[[0,.5],[1,0]],[[0,.5],[1,1]]];
+  if (kind === 'hairpin-down') return [[[0,0],[1,.5]],[[0,1],[1,.5]]];
+  return [];
+}
