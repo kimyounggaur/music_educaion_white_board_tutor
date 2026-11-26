@@ -35,5 +35,6 @@ npm run dev
 ## 설계와 자료
 
 - [리팩토링 설계서](docs/Music_Whiteboard_Refactoring_Design_v1.0_20261118.md)
+- [음악 칠판 MCP (주제 조회·미리보기 링크)](docs/Whiteboard_MCP.md)
 - [앱 개발과 검수](music-chalkboard-r1/README.md)
 - 이전 수업 앱의 이식 원본은 [6804a36](https://github.com/kimyounggaur/music_educaion_white_board_tutor/tree/6804a36)에서 확인할 수 있습니다.
